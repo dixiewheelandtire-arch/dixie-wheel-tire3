@@ -16,13 +16,19 @@ export default function Root({ children }: { children: ReactNode }) {
           <li>
             <Link href="/set-timeout">setTimeout</Link>
           </li>
+          <li>
+            <Link href="/params/next">params</Link>
+          </li>
+          <li>
+            <Link href="/searchparams?slug=next">searchParams</Link>
+          </li>
         </ul>
         <main>
-          <ReactServerRequests />
           <Suspense fallback="Loading Server Requests">
             <div data-react-server-requests-done />
             {children}
           </Suspense>
+          <ReactServerRequests />
         </main>
       </body>
     </html>

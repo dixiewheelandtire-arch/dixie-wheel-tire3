@@ -44,4 +44,36 @@ describe('react-performance-track', () => {
       ])
     )
   })
+
+  it('should show params', async () => {
+    const browser = await next.browser('/params/next')
+    await browser.elementByCss('[data-react-server-requests-done]', {
+      state: 'attached',
+    })
+
+    const track = await browser.eval('window.reactServerRequests.getSnapshot()')
+    expect(track).toEqual([
+      {
+        // TODO: Should have a name (https://linear.app/vercel/issue/NAR-417)
+        name: '\u200b',
+        properties: [],
+      },
+    ])
+  })
+
+  it('should show searchParams', async () => {
+    const browser = await next.browser('/searchparams?slug=next')
+    await browser.elementByCss('[data-react-server-requests-done]', {
+      state: 'attached',
+    })
+
+    const track = await browser.eval('window.reactServerRequests.getSnapshot()')
+    expect(track).toEqual([
+      {
+        // TODO: Should have a name (https://linear.app/vercel/issue/NAR-417)
+        name: '\u200b',
+        properties: [],
+      },
+    ])
+  })
 })
