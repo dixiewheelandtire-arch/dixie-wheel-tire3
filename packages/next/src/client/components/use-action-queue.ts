@@ -1,5 +1,5 @@
 import type { Dispatch } from 'react'
-import React, { use, useMemo } from 'react'
+import React, { use, useMemo, addTransitionType } from 'react'
 import { isThenable } from '../../shared/lib/is-thenable'
 import type { AppRouterActionQueue } from './app-router-instance'
 import type {
@@ -32,6 +32,30 @@ export function useActionQueue(
   actionQueue: AppRouterActionQueue
 ): AppRouterState {
   const [state, setState] = React.useState<ReducerState>(actionQueue.state)
+  const setStateAction = React.useCallback((newState: ReducerState) => {
+    let wasWrappedInTransition = true
+    const originalConsoleError = console.error
+    console.error = (message: unknown) => {
+      if (
+        typeof message === 'string' &&
+        message.includes('addTransitionType can only be called inside a')
+      ) {
+        wasWrappedInTransition = false
+      }
+    }
+
+    try {
+      addTransitionType('nextjs-internal-transition-check')
+    } finally {
+      console.error = originalConsoleError
+    }
+    if (!wasWrappedInTransition) {
+      throw new Error(
+        'setState was not wrapped in a Transition. This is a bug in Next.js.'
+      )
+    }
+    setState(newState)
+  }, [])
 
   // Because of a known issue that requires to decode Flight streams inside the
   // render phase, we have to be a bit clever and assign the dispatch method to
@@ -48,12 +72,12 @@ export function useActionQueue(
 
     dispatch = (action: ReducerActions) => {
       appDevRenderingIndicator(() => {
-        actionQueue.dispatch(action, setState)
+        actionQueue.dispatch(action, setStateAction)
       })
     }
   } else {
     dispatch = (action: ReducerActions) =>
-      actionQueue.dispatch(action, setState)
+      actionQueue.dispatch(action, setStateAction)
   }
 
   // When navigating to a non-prefetched route, then App Router state will be
