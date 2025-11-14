@@ -256,15 +256,28 @@ module.exports = (actionInfo) => {
                     try {
                       execResult = await handlePackageSpan
                         .traceChild('pnpm-pack-try-1')
-                        .traceAsyncFn(() => execa('pnpm', ['pack'], options))
+                        .traceAsyncFn(() =>
+                          execa('pnpm', ['pack', '--json'], options)
+                        )
                     } catch {
                       execResult = await handlePackageSpan
                         .traceChild('pnpm-pack-try-2')
-                        .traceAsyncFn(() => execa('pnpm', ['pack'], options))
+                        .traceAsyncFn(() =>
+                          execa('pnpm', ['pack', '--json'], options)
+                        )
                     }
-                    const { stdout } = execResult
-
-                    const packedFileName = stdout.trim()
+                    const { stdout: packJson } = execResult
+                    let packResult
+                    try {
+                      packResult = JSON.parse(packJson)
+                    } catch (cause) {
+                      throw new Error(
+                        'Failed to parse JSON from `pnpm pack --json`:\n' +
+                          packJson,
+                        { cause }
+                      )
+                    }
+                    const packedFileName = packResult.filename
 
                     await handlePackageSpan
                       .traceChild('rename-packed-tar-and-cleanup')

@@ -6,4 +6,9 @@ packages:
   - 'turbopack/crates/*/js'
   - 'turbopack/crates/turbopack-tests/tests/execution'
   - 'turbopack/packages/*'
+ignoredBuiltDependencies:
+  # prebuilt binaries compatible with our platforms
+  - sharp
+  # prebuilt binaries compatible with our platforms
+  - unrs-resolver
 updateNotifier: false
