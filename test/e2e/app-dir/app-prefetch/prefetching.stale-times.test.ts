@@ -127,6 +127,7 @@ describe('app dir - prefetching (custom staleTime)', () => {
     }, 'no-requests')
   })
 
+  // increment if you attempt(ed) to fix flakiness: 1
   it('should not re-fetch cached data when navigating back to a route group', async () => {
     let act: ReturnType<typeof createRouterAct>
     // Just installing so that the page doesn't automatically move past dynamic stale time
