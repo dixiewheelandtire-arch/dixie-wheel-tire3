@@ -135,10 +135,17 @@ export const createTSPlugin: tsModule.server.PluginModuleFactory = ({
     }
 
     // Quick info
-    proxy.getQuickInfoAtPosition = (fileName: string, position: number) => {
+    proxy.getQuickInfoAtPosition = (
+      fileName: string,
+      position: number,
+      // Pass all args to the getQuickInfoAtPosition function to prevent missing out.
+      // https://github.com/microsoft/vscode/issues/259321#issuecomment-3168667334
+      ...args: any[]
+    ) => {
       const prior = info.languageService.getQuickInfoAtPosition(
         fileName,
-        position
+        position,
+        ...args
       )
       if (!isAppEntryFile(fileName)) return prior
 
@@ -157,7 +164,11 @@ export const createTSPlugin: tsModule.server.PluginModuleFactory = ({
         }
       }
 
-      const overridden = entryConfig.getQuickInfoAtPosition(fileName, position)
+      const overridden = entryConfig.getQuickInfoAtPosition(
+        fileName,
+        position,
+        prior
+      )
       if (overridden) return overridden
 
       return prior

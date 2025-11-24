@@ -291,14 +291,29 @@ const config = {
   },
 
   // Show docs when hovering on the exported configs.
-  getQuickInfoAtPosition(fileName: string, position: number) {
+  getQuickInfoAtPosition(
+    fileName: string,
+    position: number,
+    prior: tsModule.QuickInfo | undefined
+  ) {
+    // If no prior, we don't expect the hover to show anything.
+    if (!prior) {
+      return prior
+    }
+
     const ts = getTs()
 
-    let overridden: tsModule.QuickInfo | undefined
+    const documentation: tsModule.QuickInfo['documentation'] = [
+      ...(prior.documentation ?? []),
+    ]
+
+    let overridden: tsModule.QuickInfo = { ...prior }
+
+    // TODO: Do we have to walk the AST, or can we populate the values we need
+    // from the prior?
     visitEntryConfig(fileName, position, (entryConfig, declaration) => {
       if (!API_DOCS[entryConfig]) return
 
-      const name = declaration.name
       const value = declaration.initializer
 
       const docsLink = {
@@ -319,58 +334,34 @@ const config = {
           : !!API_DOCS[entryConfig].options?.[key]
 
         if (isValid) {
-          overridden = {
-            kind: ts.ScriptElementKind.enumElement,
-            kindModifiers: ts.ScriptElementKindModifier.none,
-            textSpan: {
-              start: value.getStart(),
-              length: value.getWidth(),
+          documentation.push(
+            {
+              kind: 'text',
+              text:
+                API_DOCS[entryConfig].options?.[key] ||
+                API_DOCS[entryConfig].getHint?.(key) ||
+                '',
             },
-            displayParts: [],
-            documentation: [
-              {
-                kind: 'text',
-                text:
-                  API_DOCS[entryConfig].options?.[key] ||
-                  API_DOCS[entryConfig].getHint?.(key) ||
-                  '',
-              },
-              docsLink,
-            ],
-          }
+            docsLink
+          )
         } else {
           // Wrong value, display the docs link
-          overridden = {
-            kind: ts.ScriptElementKind.enumElement,
-            kindModifiers: ts.ScriptElementKindModifier.none,
-            textSpan: {
-              start: value.getStart(),
-              length: value.getWidth(),
-            },
-            displayParts: [],
-            documentation: [docsLink],
-          }
+          documentation.push(docsLink)
         }
       } else {
         // Hovers the name of the config
-        overridden = {
-          kind: ts.ScriptElementKind.enumElement,
-          kindModifiers: ts.ScriptElementKindModifier.none,
-          textSpan: {
-            start: name.getStart(),
-            length: name.getWidth(),
+        documentation.push(
+          {
+            kind: 'text',
+            text: getAPIDescription(entryConfig),
           },
-          displayParts: [],
-          documentation: [
-            {
-              kind: 'text',
-              text: getAPIDescription(entryConfig),
-            },
-            docsLink,
-          ],
-        }
+          docsLink
+        )
       }
     })
+
+    overridden.documentation = documentation
+
     return overridden
   },
 
