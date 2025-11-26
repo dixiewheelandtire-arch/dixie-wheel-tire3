@@ -59,6 +59,7 @@ import {
   handleChromeDevtoolsWorkspaceRequest,
   isChromeDevtoolsWorkspaceUrl,
 } from './chrome-devtools-workspace'
+import { isStaticMetadataFile } from '../../lib/metadata/is-metadata-route'
 
 const debug = setupDebug('next:router-server:main')
 const isNextFont = (pathname: string | null) =>
@@ -474,6 +475,19 @@ export async function initialize(opts: {
         ) {
           if (opts.dev && !isNextFont(parsedUrl.pathname)) {
             res.setHeader('Cache-Control', 'no-store, must-revalidate')
+          } else if (
+            isStaticMetadataFile(
+              // isStaticMetadataFile expects the app dir relative path, which is equivalent
+              // to a path from "{distDir}/static/metadata".
+              matchedOutput.itemPath.replace(
+                path.join(opts.dir, config.distDir, 'static/metadata'),
+                ''
+              )
+            )
+          ) {
+            // Static metadata files should be revalidated. This matches the behavior of
+            // the dynamic metadata files e.g., icon.tsx, sitemap.ts, etc.
+            res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate')
           } else {
             res.setHeader(
               'Cache-Control',

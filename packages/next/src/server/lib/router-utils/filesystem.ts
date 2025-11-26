@@ -501,14 +501,26 @@ export async function setupFsCheck(opts: {
         }
       }
 
-      if (opts.dev && isMetadataRouteFile(itemPath, [], false)) {
-        const fsPath = staticMetadataFiles.get(itemPath)
-        if (fsPath) {
-          return {
-            // "nextStaticFolder" sets Cache-Control "no-store" on dev.
-            type: 'nextStaticFolder',
-            fsPath,
-            itemPath: fsPath,
+      if (isMetadataRouteFile(itemPath, [], false)) {
+        if (opts.dev) {
+          const fsPath = staticMetadataFiles.get(itemPath)
+          if (fsPath) {
+            return {
+              // "nextStaticFolder" sets Cache-Control "no-store" on dev.
+              type: 'nextStaticFolder',
+              fsPath,
+              itemPath: fsPath,
+            }
+          }
+        } else {
+          const reqPath = path.posix.join('/_next/static/metadata', itemPath)
+          if (nextStaticFolderItems.has(reqPath)) {
+            const fsPath = path.join(distDir, 'static/metadata', itemPath)
+            return {
+              type: 'nextStaticFolder',
+              fsPath,
+              itemPath: fsPath,
+            }
           }
         }
       }

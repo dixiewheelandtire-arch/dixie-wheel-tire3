@@ -1293,6 +1293,27 @@ export default async function build(
             }
           }
           // Note: defaultPaths are not used in the build process, only for slot detection in generating route types
+
+          // Copy static metadata files for production filesystem serving.
+          // Not using a loader so that it works on all bundlers.
+          if (result.staticMetadataFiles.size > 0) {
+            await nextBuildSpan
+              .traceChild('copy-static-metadata-files')
+              .traceAsyncFn(async () => {
+                for (const [
+                  requestPath,
+                  relativePath,
+                ] of result.staticMetadataFiles) {
+                  const outPath = path.join(
+                    distDir,
+                    'static/metadata',
+                    requestPath
+                  )
+                  await fs.mkdir(path.dirname(outPath), { recursive: true })
+                  await fs.copyFile(path.join(appDir, relativePath), outPath)
+                }
+              })
+          }
         }
 
         mappedAppPages = await nextBuildSpan

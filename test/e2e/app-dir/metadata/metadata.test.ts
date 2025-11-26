@@ -719,8 +719,9 @@ describe('app dir - metadata', () => {
     it('should support root dir robots.txt', async () => {
       const res = await next.fetch('/robots.txt')
       expect(res.headers.get('content-type')).toBe(
-        // In dev, sendStatic() is used to send static files, which adds MIME type.
-        isNextDev ? 'text/plain; charset=UTF-8' : 'text/plain'
+        // In deploy, it still uses route.js to serve metadata file.
+        // Otherwise, it uses sendStatic() to send static files, which adds MIME type.
+        isNextDeploy ? 'text/plain' : 'text/plain; charset=UTF-8'
       )
       expect(await res.text()).toContain('User-Agent: *\nDisallow:')
       const invalidRobotsResponse = await next.fetch('/title/robots.txt')

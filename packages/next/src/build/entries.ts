@@ -62,7 +62,10 @@ import {
   isInternalComponent,
   isNonRoutePagesPage,
 } from '../lib/is-internal-component'
-import { isMetadataRouteFile } from '../lib/metadata/is-metadata-route'
+import {
+  isMetadataRouteFile,
+  isStaticMetadataFile,
+} from '../lib/metadata/is-metadata-route'
 import { RouteKind } from '../server/route-kind'
 import { encodeToBase64 } from './webpack/loaders/utils'
 import { normalizeCatchAllRoutes } from './normalize-catchall-routes'
@@ -94,8 +97,10 @@ export async function collectAppFiles(
   appPaths: string[]
   layoutPaths: string[]
   defaultPaths: string[]
+  staticMetadataFiles: Map<string, string>
 }> {
   // Collect app pages, layouts, and default files in a single directory traversal
+  // Returns relative paths.
   const allAppFiles = await recursiveReadDir(appDir, {
     pathnameFilter: (absolutePath) =>
       validFileMatcher.isAppRouterPage(absolutePath) ||
@@ -105,20 +110,52 @@ export async function collectAppFiles(
     ignorePartFilter: (part) => part.startsWith('_'),
   })
 
-  // Separate app pages, layouts, and defaults
-  const appPaths = allAppFiles.filter(
-    (absolutePath) =>
-      validFileMatcher.isAppRouterPage(absolutePath) ||
-      validFileMatcher.isRootNotFound(absolutePath)
-  )
-  const layoutPaths = allAppFiles.filter((absolutePath) =>
-    validFileMatcher.isAppLayoutPage(absolutePath)
-  )
-  const defaultPaths = allAppFiles.filter((absolutePath) =>
-    validFileMatcher.isAppDefaultPage(absolutePath)
-  )
+  // Separate app pages, layouts, defaults, and static metadata files
+  const appPaths = []
+  const layoutPaths = []
+  const defaultPaths = []
+  // Map of "requestPath" => "relativePath".
+  // "requestPath" will be used for the output path "{distDir}/static/metadata/{requestPath}" and
+  // its matcher. When the request comes in, the filesystem handler will look for the output path
+  // and serve the file if exists. "relativePath" will be used to copy the file to the output path.
+  const staticMetadataFiles = new Map<string, string>()
 
-  return { appPaths, layoutPaths, defaultPaths }
+  for (const relativePath of allAppFiles) {
+    if (validFileMatcher.isAppRouterPage(relativePath)) {
+      appPaths.push(relativePath)
+
+      // Static metadata files (favicon.ico, icon.png, etc.) need to be served
+      // directly from the filesystem. To enable this, we create a mapping from
+      // request paths to their actual file locations.
+      if (isStaticMetadataFile(relativePath)) {
+        let requestPath = relativePath
+        // Adds metadata file suffix and "/route" suffix
+        // "/@parallel/icon.png" -> "/@parallel/icon-<hash>.png/route"
+        requestPath = normalizeMetadataRoute(requestPath)
+        // Normalizes to app route request path
+        // "/@parallel/icon-<hash>.png/route" -> "/icon-<hash>.png"
+        requestPath = normalizeAppPath(requestPath)
+        // Converts underscore encoding
+        requestPath = requestPath.replace(/%5F/g, '_')
+        // Maps the final request path to the file location
+        staticMetadataFiles.set(requestPath, relativePath)
+      }
+    }
+
+    if (validFileMatcher.isRootNotFound(relativePath)) {
+      appPaths.push(relativePath)
+    }
+
+    if (validFileMatcher.isAppLayoutPage(relativePath)) {
+      layoutPaths.push(relativePath)
+    }
+
+    if (validFileMatcher.isAppDefaultPage(relativePath)) {
+      defaultPaths.push(relativePath)
+    }
+  }
+
+  return { appPaths, layoutPaths, defaultPaths, staticMetadataFiles }
 }
 
 /**
