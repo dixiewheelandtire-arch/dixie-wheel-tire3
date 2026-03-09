@@ -81,6 +81,9 @@
       return promise;
     }
     function ignoreReject() {}
+    function clearChunkCache(chunkId) {
+      chunkCache.delete(chunkId);
+    }
     function preloadModule(metadata) {
       for (
         var chunks = metadata[1], promises = [], i = 0;
@@ -94,7 +97,7 @@
           ? ((chunkFilename = loadChunk(chunkId, chunkFilename)),
             promises.push(chunkFilename),
             (entry = chunkCache.set.bind(chunkCache, chunkId, null)),
-            chunkFilename.then(entry, ignoreReject),
+            chunkFilename.then(entry, clearChunkCache.bind(null, chunkId)),
             chunkCache.set(chunkId, chunkFilename))
           : null !== entry && promises.push(entry);
       }

@@ -1603,6 +1603,49 @@ export async function copy_vendor_react(task_) {
       return statement.expression
     }
 
+    function replaceOnce(source, searchValue, replaceValue, context) {
+      const replaced = source.replace(searchValue, replaceValue)
+      if (replaced === source) {
+        throw new Error(`Failed to patch vendored React file: ${context}`)
+      }
+      return replaced
+    }
+
+    function indentBlock(source, indent) {
+      return source
+        .split('\n')
+        .map((line) => (line.length > 0 ? indent + line : line))
+        .join('\n')
+    }
+
+    function insertAfterIgnoreReject(source, block, context) {
+      return replaceOnce(
+        source,
+        /(^(\s*)function ignoreReject\(\) \{\}\n)/m,
+        (match, line, indent) => line + indentBlock(block, indent) + '\n',
+        context
+      )
+    }
+
+    const webpackChunkLoadCacheHelpers = `function clearChunkCache(chunkId) {
+  chunkCache.delete(chunkId);
+}`
+
+    function patchReactServerDomWebpackBrowserClient(source) {
+      const newSource = insertAfterIgnoreReject(
+        source,
+        webpackChunkLoadCacheHelpers,
+        'insert webpack browser chunk cache helpers'
+      )
+
+      return replaceOnce(
+        newSource,
+        'chunkFilename.then(entry, ignoreReject),',
+        'chunkFilename.then(entry, clearChunkCache.bind(null, chunkId)),',
+        'clear failed webpack browser chunk cache'
+      )
+    }
+
     // Remove unused files
     const reactDomCompiledDir = join(
       __dirname,
@@ -1642,11 +1685,9 @@ export async function copy_vendor_react(task_) {
       )
       // eslint-disable-next-line require-yield
       .run({ every: true }, function* (file) {
-        // We replace the module/chunk loading code with our own implementation in Next.js.
-        // NOTE: We only replace module/chunk loading for server builds because the server
-        // bundles have unique constraints like a runtime bundle. For browser builds this
-        // package will be bundled alongside user code and we don't need to introduce the extra
-        // indirection
+        // Server builds replace the module/chunk loading indirection for Next's
+        // runtime bundle constraints. Browser clients stay upstream except for
+        // a one-shot ChunkLoadError retry around client reference chunk loads.
         if (
           (file.base.startsWith('react-server-dom-webpack-client') &&
             !file.base.startsWith('react-server-dom-webpack-client.browser')) ||
@@ -1667,6 +1708,12 @@ export async function copy_vendor_react(task_) {
           )
 
           file.data = recast.print(ast).code
+        } else if (
+          file.base.startsWith('react-server-dom-webpack-client.browser')
+        ) {
+          file.data = patchReactServerDomWebpackBrowserClient(
+            file.data.toString()
+          )
         } else if (file.base === 'package.json') {
           file.data = overridePackageName(file.data)
         }
@@ -1696,11 +1743,9 @@ export async function copy_vendor_react(task_) {
       )
       // eslint-disable-next-line require-yield
       .run({ every: true }, function* (file) {
-        // We replace the module loading code with our own implementation in Next.js.
-        // NOTE: We only replace module loading for server builds because the server
-        // bundles have unique constraints like a runtime bundle. For browser builds this
-        // package will be bundled alongside user code and we don't need to introduce the extra
-        // indirection
+        // Server builds replace the module loading indirection for Next's
+        // runtime bundle constraints. Browser clients stay upstream because
+        // runtime-level chunk retries now live below React.
 
         if (
           (file.base.startsWith('react-server-dom-turbopack-client') ||
