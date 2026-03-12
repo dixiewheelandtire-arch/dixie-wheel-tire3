@@ -93,6 +93,7 @@ export interface RenderOptsPartial {
   err?: Error | null
   basePath: string
   cacheComponents: boolean
+  isRoutePPREnabled?: boolean
   trailingSlash: boolean
   images: ImageConfigComplete
   supportsDynamicResponse: boolean
@@ -142,11 +143,6 @@ export interface RenderOptsPartial {
   isPrefetch?: boolean
   htmlLimitedBots: string | undefined
   experimental: {
-    /**
-     * When true, it indicates that the current page supports partial
-     * prerendering.
-     */
-    isRoutePPREnabled?: boolean
     expireTime: number | undefined
     staleTimes: ExperimentalConfig['staleTimes'] | undefined
     clientTraceMetadata: string[] | undefined
