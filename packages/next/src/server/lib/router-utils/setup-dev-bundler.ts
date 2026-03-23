@@ -101,6 +101,7 @@ import {
 import { ensureLeadingSlash } from '../../../shared/lib/page-path/ensure-leading-slash'
 import { Lockfile, type DevServerInfo } from '../../../build/lockfile'
 import { deobfuscateText } from '../../../shared/lib/magic-identifier'
+import { spawnSync } from 'child_process'
 
 export type SetupOpts = {
   renderServer: LazyRenderServerInstance
@@ -408,6 +409,16 @@ async function startWatcher(
         )
       },
     })
+    const originalConsoleError = console.error
+    console.error = (...args: any[]) => {
+      const msg = args[0]
+      if (typeof msg === 'string' && msg.includes('EMFILE')) {
+        spawnSync(`lsof`, [`-a`, `-p`, `${process.pid}`], {
+          stdio: 'inherit',
+        })
+      }
+      originalConsoleError(...args)
+    }
     const fileWatchTimes = new Map()
     let enabledTypeScript = await verifyTypeScript(opts)
     let previousClientRouterFilters: any
