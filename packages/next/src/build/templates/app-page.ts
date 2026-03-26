@@ -49,6 +49,7 @@ import {
   NEXT_IS_PRERENDER_HEADER,
   NEXT_DID_POSTPONE_HEADER,
   RSC_CONTENT_TYPE_HEADER,
+  RSC_CONTENT_TYPE_HEADER_FULL,
 } from '../../client/components/app-router-headers' with { 'turbopack-transition': 'next-server-utility' }
 import {
   getBotType,
@@ -1556,7 +1557,7 @@ export async function handler(
             poweredByHeader: nextConfig.poweredByHeader,
             result: RenderResult.fromStatic(
               matchedSegment,
-              RSC_CONTENT_TYPE_HEADER
+              RSC_CONTENT_TYPE_HEADER_FULL
             ),
             cacheControl: cacheEntry.cacheControl,
           })
@@ -1661,7 +1662,7 @@ export async function handler(
         // If this is a dynamic RSC request, then stream the response.
         if (typeof cachedData.rscData === 'undefined') {
           // If the response is not an RSC response, then we can't serve it.
-          if (cachedData.html.contentType !== RSC_CONTENT_TYPE_HEADER) {
+          if (!cachedData.html.contentType?.startsWith(RSC_CONTENT_TYPE_HEADER)) {
             if (nextConfig.cacheComponents) {
               res.statusCode = 404
               return sendRenderResult({
@@ -1699,7 +1700,7 @@ export async function handler(
           poweredByHeader: nextConfig.poweredByHeader,
           result: RenderResult.fromStatic(
             cachedData.rscData,
-            RSC_CONTENT_TYPE_HEADER
+            RSC_CONTENT_TYPE_HEADER_FULL
           ),
           cacheControl: cacheEntry.cacheControl,
         })

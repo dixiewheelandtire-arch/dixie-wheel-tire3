@@ -15,6 +15,8 @@ export const NEXT_HMR_REFRESH_HEADER = 'next-hmr-refresh' as const
 export const NEXT_HMR_REFRESH_HASH_COOKIE = '__next_hmr_refresh_hash__' as const
 export const NEXT_URL = 'next-url' as const
 export const RSC_CONTENT_TYPE_HEADER = 'text/x-component' as const
+// Full Content-Type value including charset, used when setting response headers.
+export const RSC_CONTENT_TYPE_HEADER_FULL = 'text/x-component; charset=utf-8' as const
 
 // Header for the Instant Navigation Testing API. In development and testing
 // builds, static pre-renders normally don't happen. This header tells the

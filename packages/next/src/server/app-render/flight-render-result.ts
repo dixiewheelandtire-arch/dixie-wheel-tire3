@@ -1,8 +1,8 @@
-import { RSC_CONTENT_TYPE_HEADER } from '../../client/components/app-router-headers'
+import { RSC_CONTENT_TYPE_HEADER_FULL } from '../../client/components/app-router-headers'
 import RenderResult, { type RenderResultMetadata } from '../render-result'
 
 /**
- * Flight Response is always set to RSC_CONTENT_TYPE_HEADER to ensure it does not get interpreted as HTML.
+ * Flight Response is always set to RSC_CONTENT_TYPE_HEADER_FULL (text/x-component; charset=utf-8) to ensure it does not get interpreted as HTML.
  */
 export class FlightRenderResult extends RenderResult {
   constructor(
@@ -11,7 +11,7 @@ export class FlightRenderResult extends RenderResult {
     waitUntil?: Promise<unknown>
   ) {
     super(response, {
-      contentType: RSC_CONTENT_TYPE_HEADER,
+      contentType: RSC_CONTENT_TYPE_HEADER_FULL,
       metadata,
       waitUntil,
     })
