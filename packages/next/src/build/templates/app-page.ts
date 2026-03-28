@@ -1608,8 +1608,21 @@ export async function handler(
           delete headers[NEXT_CACHE_TAGS_HEADER]
         }
 
+        // Headers that support multiple values must use appendHeader;
+        // all others use setHeader to avoid duplicates when the render
+        // phase already set the same header (e.g. Location) (#82117).
+        const multiValueHeaders = new Set([
+          'set-cookie',
+          'www-authenticate',
+          'proxy-authenticate',
+          'vary',
+        ])
+
         for (let [key, value] of Object.entries(headers)) {
           if (typeof value === 'undefined') continue
+
+          const useAppend =
+            Array.isArray(value) || multiValueHeaders.has(key.toLowerCase())
 
           if (Array.isArray(value)) {
             for (const v of value) {
@@ -1617,9 +1630,17 @@ export async function handler(
             }
           } else if (typeof value === 'number') {
             value = value.toString()
-            res.appendHeader(key, value)
+            if (useAppend) {
+              res.appendHeader(key, value)
+            } else {
+              res.setHeader(key, value)
+            }
           } else {
-            res.appendHeader(key, value)
+            if (useAppend) {
+              res.appendHeader(key, value)
+            } else {
+              res.setHeader(key, value)
+            }
           }
         }
       }
