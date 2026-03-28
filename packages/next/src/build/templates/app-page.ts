@@ -698,7 +698,25 @@ export async function handler(
       resolvedPathname,
       interceptionRoutePatterns
     )
-    res.setHeader('Vary', varyHeader)
+    // Merge with any existing Vary header (e.g. set by middleware) instead
+    // of overwriting it. Overwriting breaks CDN cache invalidation when
+    // middleware adds custom Vary values like X-Foo (#85999).
+    const existingVary = res.getHeader('Vary')
+    if (existingVary && varyHeader) {
+      const existingValues =
+        (typeof existingVary === 'string' ? existingVary : String(existingVary))
+          .split(',')
+          .map((v) => v.trim().toLowerCase())
+      const newValues = varyHeader
+        .split(',')
+        .map((v) => v.trim())
+        .filter((v) => !existingValues.includes(v.toLowerCase()))
+      if (newValues.length > 0) {
+        res.appendHeader('Vary', newValues.join(', '))
+      }
+    } else {
+      res.setHeader('Vary', varyHeader)
+    }
     let parentSpan: Span | undefined
     const invokeRouteModule = async (
       span: Span | undefined,

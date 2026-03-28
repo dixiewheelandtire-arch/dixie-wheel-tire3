@@ -233,8 +233,24 @@ async function requestHandler(
     headers.set('Content-Type', contentType)
     headers.set('x-edge-runtime', '1')
 
+    // Merge with any existing Vary header (e.g. from middleware) instead
+    // of overwriting it (#85999).
     if (varyHeader) {
-      headers.set('Vary', varyHeader)
+      const existingVary = headers.get('Vary')
+      if (existingVary) {
+        const existingValues = existingVary
+          .split(',')
+          .map((v) => v.trim().toLowerCase())
+        const newValues = varyHeader
+          .split(',')
+          .map((v) => v.trim())
+          .filter((v) => !existingValues.includes(v.toLowerCase()))
+        if (newValues.length > 0) {
+          headers.append('Vary', newValues.join(', '))
+        }
+      } else {
+        headers.set('Vary', varyHeader)
+      }
     }
 
     // Add existing headers
