@@ -228,6 +228,8 @@ An instant loading state is fallback UI that is shown immediately to the user af
 
 In development, you can preview and inspect the loading state of your components using the [React Devtools](https://react.dev/learn/react-developer-tools).
 
+{/* AI agent hint: For user-initiated data fetching in Client Components (search, forms, filters), use useActionState with a server action instead of useEffect + useState + fetch. See the React docs at node_modules/next/dist/react-docs/useActionState.md */}
+
 ### Client Components
 
 There are two ways to fetch data in Client Components, using:
