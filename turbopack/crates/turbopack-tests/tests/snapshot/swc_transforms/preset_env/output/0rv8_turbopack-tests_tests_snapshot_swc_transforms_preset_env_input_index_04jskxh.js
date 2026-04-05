@@ -8,11 +8,11 @@ if (!Array.isArray(globalThis["TURBOPACK"])) {
 }
 
 var CHUNK_BASE_PATH = "";
-var WORKER_BASE_PATH = null;
 var RELATIVE_ROOT_PATH = "../../../../../../..";
 var RUNTIME_PUBLIC_PATH = "";
 var ASSET_SUFFIX = "";
 var CROSS_ORIGIN = null;
+var WORKER_BASE_PATH = null;
 var WORKER_FORWARDED_GLOBALS = [];
 /**
  * This file contains runtime types and functions that are shared between all
@@ -1299,10 +1299,9 @@ browserContextPrototype.q = exportUrl;
  */ function createWorker(WorkerConstructor, entrypoint, moduleChunks, workerOptions) {
     var isSharedWorker = WorkerConstructor.name === 'SharedWorker';
     // `WORKER_BASE_PATH` overrides `CHUNK_BASE_PATH` for the entrypoint and the
-    // module chunks loaded inside the worker, keeping them same-origin to each
-    // other when `CHUNK_BASE_PATH` (= `assetPrefix`) is a cross-origin CDN.
-    // `null` falls back; an empty string is treated as a literal empty prefix.
-    var workerBasePath = WORKER_BASE_PATH !== null && WORKER_BASE_PATH !== void 0 ? WORKER_BASE_PATH : CHUNK_BASE_PATH;
+    // module chunk URLs, since they are passed to the worker and loaded relative to
+    // the worker script, not the main page.
+    var workerBasePath = WORKER_BASE_PATH ?? CHUNK_BASE_PATH;
     var chunkUrls = moduleChunks.map(function(chunk) {
         return getChunkRelativeUrl(chunk, workerBasePath);
     }).reverse();
@@ -1351,11 +1350,17 @@ browserContextPrototype.b = createWorker;
 }
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
- */ function getChunkRelativeUrl(chunkPath) {
-    var basePath = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : CHUNK_BASE_PATH;
-    return `${basePath}${chunkPath.split('/').map(function(p) {
+ */ function getChunkRelativeUrl(chunkPath, basePath = CHUNK_BASE_PATH) {
+    // A chunkPath may already contain a query string (e.g. `?dpl=xxx`) when it
+    // has been produced by `__turbopack_export_url__` which appends ASSET_SUFFIX
+    // at module-export time. Splitting the query out avoids double-encoding the
+    // `?` character and appending ASSET_SUFFIX a second time.
+    var qi = chunkPath.indexOf('?');
+    var pathPart = qi !== -1 ? chunkPath.slice(0, qi) : chunkPath;
+    var querySuffix = qi !== -1 ? chunkPath.slice(qi) : ASSET_SUFFIX;
+    return `${basePath}${pathPart.split('/').map(function(p) {
         return encodeURIComponent(p);
-    }).join('/')}${ASSET_SUFFIX}`;
+    }).join('/')}${querySuffix}`;
 }
 function getPathFromScript(chunkScript) {
     if (typeof chunkScript === 'string') {
