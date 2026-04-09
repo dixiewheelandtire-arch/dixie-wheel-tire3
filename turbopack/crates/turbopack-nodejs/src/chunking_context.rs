@@ -29,7 +29,7 @@ use turbopack_core::{
 };
 use turbopack_ecmascript::{
     async_chunk::module::AsyncLoaderModule,
-    chunk::EcmascriptChunk,
+    chunk::{EcmascriptChunk, EcmascriptChunkPlaceable},
     manifest::{chunk_asset::ManifestAsyncModule, loader_module::ManifestLoaderModule},
 };
 use turbopack_ecmascript_runtime::RuntimeType;
@@ -533,14 +533,13 @@ impl ChunkingContext for NodeJsChunkingContext {
     ) -> Result<Vc<ChunkGroupResult>> {
         let span = tracing::info_span!("chunking", name = display(ident.to_string().await?));
         async move {
-            let modules = chunk_group.entries();
             let MakeChunkGroupResult {
                 chunks,
                 referenced_output_assets,
                 references,
                 availability_info,
             } = make_chunk_group(
-                modules,
+                &chunk_group,
                 module_graph,
                 ResolvedVc::upcast(self),
                 availability_info,
@@ -583,14 +582,13 @@ impl ChunkingContext for NodeJsChunkingContext {
             chunking_type = "entry",
         );
         async move {
-            let entries = chunk_group.entries();
             let MakeChunkGroupResult {
                 chunks,
                 mut referenced_output_assets,
                 references,
                 availability_info,
             } = make_chunk_group(
-                entries,
+                &chunk_group,
                 module_graph,
                 ResolvedVc::upcast(self),
                 availability_info,
@@ -609,16 +607,24 @@ impl ChunkingContext for NodeJsChunkingContext {
 
             referenced_output_assets.extend(extra_referenced_assets.await?.iter().copied());
 
-            let Some(module) = ResolvedVc::try_sidecast(chunk_group.entries().last().unwrap())
+            let module = chunk_group.entries().last().unwrap();
+            let Some(module) =
+                ResolvedVc::try_sidecast::<Box<dyn EcmascriptChunkPlaceable>>(module)
             else {
-                bail!("module must be placeable in an ecmascript chunk");
+                bail!("last entry must be EcmascriptChunkPlaceable {:?}", module);
             };
 
             let evaluatable_assets = chunk_group
                 .entries()
                 .map(|entry| {
-                    ResolvedVc::try_sidecast::<Box<dyn EvaluatableAsset>>(entry)
-                        .context("entry_chunk_group entries must be evaluatable")
+                    ResolvedVc::try_sidecast::<Box<dyn EvaluatableAsset>>(entry).with_context(
+                        || {
+                            format!(
+                                "entry_chunk_group entries must be EvaluatableAssets {:?}",
+                                entry
+                            )
+                        },
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?;
 

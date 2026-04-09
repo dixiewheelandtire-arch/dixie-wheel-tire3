@@ -32,6 +32,7 @@ use crate::{
         async_module_info::{AsyncModulesInfo, compute_async_module_info},
         binding_usage_info::BindingUsageInfo,
         chunk_group_info::{ChunkGroupEntry, ChunkGroupInfo, compute_chunk_group_info},
+        collect::{CollectedModules, collect_graph},
         merged_modules::{MergedModuleInfo, compute_merged_modules},
         module_batches::{ModuleBatchesGraph, compute_module_batches},
         style_groups::{StyleGroups, StyleGroupsConfig, compute_style_groups},
@@ -44,6 +45,7 @@ use crate::{
 pub mod async_module_info;
 pub mod binding_usage_info;
 pub mod chunk_group_info;
+pub mod collect;
 pub mod merged_modules;
 pub mod module_batch;
 pub(crate) mod module_batches;
@@ -257,6 +259,8 @@ pub struct SingleModuleGraph {
     PartialEq,
     ValueDebugFormat,
     NonLocalValue,
+    Encode,
+    Decode,
 )]
 pub struct RefData {
     pub chunking_type: ChunkingType,
@@ -698,56 +702,22 @@ pub struct ModuleGraph {
 
 #[turbo_tasks::value_impl]
 impl ModuleGraph {
+    /// Analyze the module graph and potentially remove unused references (by determining the used
+    /// exports and removing unused imports).
     #[turbo_tasks::function(operation)]
-    pub async fn from_single_graph(graph: OperationVc<SingleModuleGraph>) -> Result<Vc<Self>> {
-        let graph = Self::create(vec![graph], None)
-            .read_strongly_consistent()
-            .await?;
-        Ok(ReadRef::cell(graph))
-    }
-
-    #[turbo_tasks::function(operation)]
-    pub async fn from_graphs(graphs: Vec<OperationVc<SingleModuleGraph>>) -> Result<Vc<Self>> {
-        let graph = Self::create(graphs, None)
-            .read_strongly_consistent()
-            .await?;
-        Ok(ReadRef::cell(graph))
-    }
-
-    /// Analyze the module graph and remove unused references (by determining the used exports and
-    /// removing unused imports).
-    ///
-    /// In particular, this removes ModuleReference-s that list only unused exports in the
-    /// `import_usage()`
-    #[turbo_tasks::function(operation)]
-    pub async fn from_single_graph_without_unused_references(
-        graph: OperationVc<SingleModuleGraph>,
-        binding_usage: OperationVc<BindingUsageInfo>,
-    ) -> Result<Vc<Self>> {
-        let graph = Self::create(vec![graph], Some(binding_usage))
-            .read_strongly_consistent()
-            .await?;
-        Ok(ReadRef::cell(graph))
-    }
-
-    /// Analyze the module graph and remove unused references (by determining the used exports and
-    /// removing unused imports).
-    ///
-    /// In particular, this removes ModuleReference-s that list only unused exports in the
-    /// `import_usage()`
-    #[turbo_tasks::function(operation)]
-    pub async fn from_graphs_without_unused_references(
+    pub async fn from_graphs(
         graphs: Vec<OperationVc<SingleModuleGraph>>,
-        binding_usage: OperationVc<BindingUsageInfo>,
+        binding_usage: Option<OperationVc<BindingUsageInfo>>,
     ) -> Result<Vc<Self>> {
-        let graph = Self::create(graphs, Some(binding_usage))
+        let graph = Self::from_graphs_inner(graphs, binding_usage)
             .read_strongly_consistent()
             .await?;
+
         Ok(ReadRef::cell(graph))
     }
 
     #[turbo_tasks::function(operation)]
-    async fn create(
+    async fn from_graphs_inner(
         graphs: Vec<OperationVc<SingleModuleGraph>>,
         binding_usage: Option<OperationVc<BindingUsageInfo>>,
     ) -> Result<Vc<ModuleGraph>> {
@@ -766,6 +736,11 @@ impl ModuleGraph {
             },
         }
         .cell())
+    }
+
+    #[turbo_tasks::function]
+    pub async fn collected_modules(self: Vc<Self>) -> Result<Vc<CollectedModules>> {
+        collect_graph(self).await
     }
 
     #[turbo_tasks::function]
@@ -1362,13 +1337,14 @@ impl ModuleGraphSnapshot {
     ///
     /// Returns the number of node visits (i.e. higher than the node count if there are
     /// retraversals).
-    pub fn traverse_edges_fixed_point_with_priority<S, P: Ord>(
-        &self,
+    pub fn traverse_edges_fixed_point_with_priority<'graph, S, P: Ord>(
+        &'graph self,
         entries: impl IntoIterator<Item = (ResolvedVc<Box<dyn Module>>, P)>,
         state: &mut S,
         mut visit: impl FnMut(
-            Option<(ResolvedVc<Box<dyn Module>>, &'_ RefData, GraphEdgeIndex)>,
+            Option<(ResolvedVc<Box<dyn Module>>, &'graph RefData, GraphEdgeIndex)>,
             ResolvedVc<Box<dyn Module>>,
+            GraphNodeIndex,
             &mut S,
         ) -> Result<GraphTraversalAction>,
         priority: impl Fn(ResolvedVc<Box<dyn Module>>, &mut S) -> Result<P>,
@@ -1423,7 +1399,12 @@ impl ModuleGraphSnapshot {
         );
 
         for entry_node in &queue {
-            visit(None, self.get_node(entry_node.node)?.module(), state)?;
+            visit(
+                None,
+                self.get_node(entry_node.node)?.module(),
+                entry_node.node,
+                state,
+            )?;
         }
 
         let mut visit_count = 0usize;
@@ -1440,6 +1421,7 @@ impl ModuleGraphSnapshot {
                 let action = visit(
                     Some((node_weight.module(), self.get_edge(edge)?, edge)),
                     succ_weight.module(),
+                    succ,
                     state,
                 )?;
 
@@ -1728,6 +1710,19 @@ impl Visit<SingleModuleGraphBuilderNode, RefData> for SingleModuleGraphBuilder<'
                     let _span = span.entered();
                     span = tracing::info_span!("async reference");
                 }
+                ChunkingType::PerEntry => {
+                    let _span = span.entered();
+                    span = tracing::info_span!("per-entry reference");
+                }
+                ChunkingType::Emitted { merge_tag, .. } => {
+                    let _span = span.entered();
+                    span = tracing::info_span!("emitted reference", merge_tag = debug(&merge_tag));
+                }
+                ChunkingType::Collected { merge_tag, .. } => {
+                    let _span = span.entered();
+                    span =
+                        tracing::info_span!("collected reference", merge_tag = debug(&merge_tag));
+                }
                 ChunkingType::Isolated { _ty: ty, merge_tag } => {
                     let _span = span.entered();
                     span = tracing::info_span!(
@@ -1905,7 +1900,7 @@ pub mod tests {
                 graph.traverse_edges_fixed_point_with_priority(
                     entry_modules.into_iter().map(|m| (m, 0)),
                     &mut (),
-                    |parent, target, _| {
+                    |parent, target, _, _| {
                         visits.push((
                             parent.map(|(node, _, _)| module_to_name.get(&node).unwrap().clone()),
                             module_to_name.get(&target).unwrap().clone(),
@@ -1962,7 +1957,7 @@ pub mod tests {
                 graph.traverse_edges_fixed_point_with_priority(
                     entry_modules.into_iter().map(|m| (m, 0)),
                     &mut (),
-                    |parent, target, _| {
+                    |parent, target, _, _| {
                         visits.push((
                             parent.map(|(node, _, _)| module_to_name.get(&node).unwrap().clone()),
                             module_to_name.get(&target).unwrap().clone(),
@@ -2103,15 +2098,18 @@ pub mod tests {
                     false,
                 );
 
-                let module_graph = ModuleGraph::from_graphs(vec![
-                    parent_graph,
-                    SingleModuleGraph::new_with_entries_visited(
-                        ResolvedVc::cell(vec![ChunkGroupEntry::Entry(vec![a_module])]),
-                        VisitedModules::from_graph(parent_graph),
-                        false,
-                        false,
-                    ),
-                ])
+                let module_graph = ModuleGraph::from_graphs(
+                    vec![
+                        parent_graph,
+                        SingleModuleGraph::new_with_entries_visited(
+                            ResolvedVc::cell(vec![ChunkGroupEntry::Entry(vec![a_module])]),
+                            VisitedModules::from_graph(parent_graph),
+                            false,
+                            false,
+                        ),
+                    ],
+                    None,
+                )
                 .connect();
                 let child_graph = module_graph
                     .iter_graphs()
@@ -2366,7 +2364,9 @@ pub mod tests {
                 .await?
                 .into_iter()
                 .collect();
-            let module_graph = ModuleGraph::from_single_graph(graph).connect().await?;
+            let module_graph = ModuleGraph::from_graphs(vec![graph], None)
+                .connect()
+                .await?;
 
             Ok(SetupGraph {
                 module_graph,

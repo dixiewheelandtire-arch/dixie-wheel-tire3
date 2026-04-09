@@ -157,7 +157,9 @@ impl ChunkGroupEntry {
     }
 }
 
-#[derive(Debug, Clone, Hash, TaskInput, PartialEq, Eq, TraceRawVcs, Encode, Decode)]
+#[derive(
+    Debug, Clone, Hash, TaskInput, PartialEq, Eq, TraceRawVcs, Encode, Decode, NonLocalValue,
+)]
 pub enum ChunkGroup {
     /// The entry chunk group of the compilation, e.g. src/index.js for a SPA, or app/foo/page.js
     /// for Next.js.
@@ -186,6 +188,8 @@ pub enum ChunkGroup {
         merge_tag: RcStr,
         entries: Vec<ResolvedVc<Box<dyn Module>>>,
     },
+    /// a module with an incoming collected edge
+    Collected(ResolvedVc<Box<dyn Module>>),
 }
 
 impl ChunkGroup {
@@ -204,9 +208,10 @@ impl ChunkGroup {
     /// unspecified.
     pub fn entries(&self) -> impl Iterator<Item = ResolvedVc<Box<dyn Module>>> + Clone + '_ {
         match self {
-            ChunkGroup::Async(e) | ChunkGroup::Isolated(e) | ChunkGroup::Shared(e) => {
-                Either::Left(std::iter::once(*e))
-            }
+            ChunkGroup::Async(e)
+            | ChunkGroup::Isolated(e)
+            | ChunkGroup::Shared(e)
+            | ChunkGroup::Collected(e) => Either::Left(std::iter::once(*e)),
             ChunkGroup::Entry(entries)
             | ChunkGroup::IsolatedMerged { entries, .. }
             | ChunkGroup::SharedMultiple(entries)
@@ -216,7 +221,10 @@ impl ChunkGroup {
 
     pub fn entries_count(&self) -> usize {
         match self {
-            ChunkGroup::Async(_) | ChunkGroup::Isolated(_) | ChunkGroup::Shared(_) => 1,
+            ChunkGroup::Async(_)
+            | ChunkGroup::Isolated(_)
+            | ChunkGroup::Shared(_)
+            | ChunkGroup::Collected(_) => 1,
             ChunkGroup::Entry(entries)
             | ChunkGroup::IsolatedMerged { entries, .. }
             | ChunkGroup::SharedMultiple(entries)
@@ -235,6 +243,9 @@ impl ChunkGroup {
                     .await?
             ),
             ChunkGroup::Async(entry) => turbofmt!("ChunkGroup::Async({:?})", entry.ident())
+                .await?
+                .to_string(),
+            ChunkGroup::Collected(entry) => turbofmt!("ChunkGroup::Collected({:?})", entry.ident())
                 .await?
                 .to_string(),
             ChunkGroup::Isolated(entry) => turbofmt!("ChunkGroup::Isolated({:?})", entry.ident())
@@ -305,6 +316,8 @@ pub enum ChunkGroupKey {
         parent: ChunkGroupId,
         merge_tag: RcStr,
     },
+    /// a module with an incoming collected edge
+    Collected(ResolvedVc<Box<dyn Module>>),
 }
 
 impl ChunkGroupKey {
@@ -324,6 +337,9 @@ impl ChunkGroupKey {
             ChunkGroupKey::Async(module) => {
                 turbofmt!("Async({:?})", module.ident()).await?.to_string()
             }
+            ChunkGroupKey::Collected(module) => turbofmt!("Collected({:?})", module.ident())
+                .await?
+                .to_string(),
             ChunkGroupKey::Isolated(module) => turbofmt!("Isolated({:?})", module.ident())
                 .await?
                 .to_string(),
@@ -537,6 +553,7 @@ pub async fn compute_chunk_group_info(graph: &ModuleGraph) -> Result<Vc<ChunkGro
             &mut module_chunk_groups,
             |parent_info: Option<(ResolvedVc<Box<dyn Module>>, &'_ RefData, _)>,
              node: ResolvedVc<Box<dyn Module>>,
+             _,
              module_chunk_groups: &mut FxHashMap<
                 ResolvedVc<Box<dyn Module>>,
                 RoaringBitmapWrapper,
@@ -593,6 +610,31 @@ pub async fn compute_chunk_group_info(graph: &ModuleGraph) -> Result<Vc<ChunkGro
                             ChunkGroupInheritance::ChunkGroup(Either::Right(Either::Right(
                                 chunk_groups,
                             )))
+                        }
+                        ChunkingType::Emitted {
+                            merge_tag: _,
+                            is_async,
+                            emit_to_all_entries: _,
+                        } => {
+                            // TODO ideally this would get the chunk group bitset of the parent
+                            // ChunkGroup::Entry
+                            ChunkGroupInheritance::ChunkGroup(Either::Left(std::iter::once(
+                                if *is_async {
+                                    // TODO is this correct?
+                                    ChunkGroupKey::Async(node)
+                                } else {
+                                    ChunkGroupKey::Collected(node)
+                                },
+                            )))
+                        }
+                        ChunkingType::Collected { .. } => {
+                            // These only exist in the module_batches graph.
+                            unreachable!();
+                        }
+                        ChunkingType::PerEntry => {
+                            // This edge in itself is irrelevant, but continue with transitive
+                            // imports.
+                            return Ok(GraphTraversalAction::Continue);
                         }
                         ChunkingType::Traced => {
                             // Traced modules are not placed in chunk groups
@@ -767,6 +809,7 @@ pub async fn compute_chunk_group_info(graph: &ModuleGraph) -> Result<Vc<ChunkGro
                 .map(|(k, (_, merged_entries))| match k {
                     ChunkGroupKey::Entry(entries) => ChunkGroup::Entry(entries),
                     ChunkGroupKey::Async(module) => ChunkGroup::Async(module),
+                    ChunkGroupKey::Collected(module) => ChunkGroup::Collected(module),
                     ChunkGroupKey::Isolated(module) => ChunkGroup::Isolated(module),
                     ChunkGroupKey::IsolatedMerged { parent, merge_tag } => {
                         ChunkGroup::IsolatedMerged {

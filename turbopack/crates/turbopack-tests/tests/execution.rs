@@ -26,7 +26,11 @@ use turbo_tasks_fs::{
 use turbo_unix_path::sys_to_unix;
 use turbopack::{
     ModuleAssetContext,
-    module_options::{EcmascriptOptionsContext, ModuleOptionsContext, TypescriptTransformOptions},
+    collect_module::CollectModuleType,
+    module_options::{
+        EcmascriptOptionsContext, ModuleOptionsContext, ModuleRule, ModuleRuleEffect, ModuleType,
+        RuleCondition, TypescriptTransformOptions,
+    },
 };
 use turbopack_core::{
     chunk::{ChunkingConfig, MangleType, MinifyType},
@@ -41,7 +45,7 @@ use turbopack_core::{
     module_graph::{
         ModuleGraph, SingleModuleGraph, binding_usage_info::compute_binding_usage_info,
     },
-    reference_type::{InnerAssets, ReferenceType},
+    reference_type::{InnerAssets, ReferenceType, ReferenceTypeCondition},
     resolve::{
         ExternalTraced, ExternalType,
         options::{ImportMap, ImportMapping},
@@ -273,6 +277,8 @@ struct TestOptions {
     remove_unused_exports: bool,
     #[serde(default = "default_true")]
     scope_hoisting: bool,
+    #[serde(default = "default_true")]
+    infer_module_side_effects: bool,
     #[serde(default)]
     minify: bool,
     #[serde(default)]
@@ -294,6 +300,7 @@ impl Default for TestOptions {
             remove_unused_exports: default_true(),
             remove_unused_imports: default_true(),
             scope_hoisting: default_true(),
+            infer_module_side_effects: default_true(),
             minify: false,
             production_chunking: false,
         }
@@ -445,7 +452,7 @@ async fn run_test_operation(prepared_test: ResolvedVc<PreparedTest>) -> Result<V
                 enable_import_as_bytes: true,
                 import_externals: true,
                 enable_exports_info_inlining: true,
-                infer_module_side_effects: true,
+                infer_module_side_effects: options.infer_module_side_effects,
                 ..Default::default()
             },
             environment: Some(env),
@@ -457,6 +464,12 @@ async fn run_test_operation(prepared_test: ResolvedVc<PreparedTest>) -> Result<V
                     ..Default::default()
                 }
                 .resolved_cell(),
+            )],
+            module_rules: vec![ModuleRule::new(
+                RuleCondition::ReferenceType(ReferenceTypeCondition::Collect),
+                vec![ModuleRuleEffect::ModuleType(ModuleType::Custom(
+                    ResolvedVc::upcast(CollectModuleType::new().to_resolved().await?),
+                ))],
             )],
             ..Default::default()
         }
@@ -517,7 +530,7 @@ async fn run_test_operation(prepared_test: ResolvedVc<PreparedTest>) -> Result<V
         false,
         true,
     );
-    let mut module_graph = ModuleGraph::from_single_graph(single_graph);
+    let mut module_graph = ModuleGraph::from_graphs(vec![single_graph], None);
 
     let binding_usage = if options.remove_unused_imports || options.remove_unused_exports {
         Some(compute_binding_usage_info(
@@ -530,8 +543,7 @@ async fn run_test_operation(prepared_test: ResolvedVc<PreparedTest>) -> Result<V
     if options.remove_unused_imports
         && let Some(binding_usage) = binding_usage
     {
-        module_graph =
-            ModuleGraph::from_single_graph_without_unused_references(single_graph, binding_usage);
+        module_graph = ModuleGraph::from_graphs(vec![single_graph], Some(binding_usage));
     }
     let module_graph = module_graph.connect();
 
