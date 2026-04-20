@@ -24,6 +24,8 @@ describe('find config', () => {
         : '') +
       `import "./.next/types/routes.d.ts";` +
       eol +
+      `import "./.next/types/link.d.ts";` +
+      eol +
       eol +
       '// NOTE: This file should not be edited' +
       eol +
@@ -55,6 +57,8 @@ describe('find config', () => {
         : '') +
       `import "./.next/types/routes.d.ts";` +
       eol +
+      `import "./.next/types/link.d.ts";` +
+      eol +
       eol +
       '// NOTE: This file should not be edited' +
       eol +
@@ -85,6 +89,8 @@ describe('find config', () => {
         ? '/// <reference types="next/image-types/global" />' + eol
         : '') +
       `import "./.next/types/routes.d.ts";` +
+      eol +
+      `import "./.next/types/link.d.ts";` +
       eol +
       eol +
       '// NOTE: This file should not be edited' +
