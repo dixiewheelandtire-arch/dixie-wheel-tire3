@@ -42,6 +42,27 @@ describe('debug-build-paths', () => {
         expect(buildResult.cliOutput).not.toContain('Route (app)')
       })
 
+      it('should build nested pages index route with support entries', async () => {
+        const buildResult = await next.build({
+          args: ['--debug-build-paths', 'pages/[slug]/nested/index.tsx'],
+        })
+        expect(buildResult.exitCode).toBe(0)
+        expect(buildResult.cliOutput).toContain('Route (pages)')
+        expect(buildResult.cliOutput).toContain('/[slug]/nested')
+
+        const pagesManifest = JSON.parse(
+          await next.readFile('.next/server/pages-manifest.json')
+        )
+        expect(pagesManifest).toContainKeys([
+          '/[slug]/nested',
+          '/404',
+          '/500',
+          '/_app',
+          '/_document',
+          '/_error',
+        ])
+      })
+
       it('should build dynamic route with literal [slug] path', async () => {
         // Test that literal paths with brackets work without escaping
         // The path is checked for file existence before being treated as glob

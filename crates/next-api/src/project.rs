@@ -247,6 +247,28 @@ impl DebugBuildPathsRouteKeys {
             .into())
     }
 
+    fn pages_route_key_from_debug_path(path: &str) -> RcStr {
+        let file_name = path.rsplit('/').next().unwrap_or(path);
+        let mut route = path;
+
+        // Pages router: "/foo.tsx" -> "/foo"
+        // Catch-all routes like "/foo/[...slug]" contain dots in the segment name;
+        // only treat the suffix as an extension when it is a plain alphanumeric token.
+        if let Some(dot_idx) = file_name.rfind('.') {
+            let ext = &file_name[dot_idx + 1..];
+            if !ext.is_empty() && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+                let trimmed_len = path.len() - (file_name.len() - dot_idx);
+                route = &path[..trimmed_len];
+            }
+        }
+
+        if route == "/index" {
+            return rcstr!("/");
+        }
+
+        route.strip_suffix("/index").unwrap_or(route).into()
+    }
+
     fn from_debug_build_paths(paths: &DebugBuildPaths) -> Result<Self> {
         Ok(Self {
             app: paths
@@ -257,20 +279,7 @@ impl DebugBuildPathsRouteKeys {
             pages: paths
                 .pages
                 .iter()
-                .map(|path| {
-                    // Pages router: "/foo.tsx" -> "/foo"
-                    // Catch-all routes like "/foo/[...slug]" contain dots in the segment name;
-                    // only treat the suffix as an extension when it is a plain alphanumeric token.
-                    let file_name = path.rsplit('/').next().unwrap_or(path);
-                    if let Some(dot_idx) = file_name.rfind('.') {
-                        let ext = &file_name[dot_idx + 1..];
-                        if !ext.is_empty() && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
-                            let trimmed_len = path.len() - (file_name.len() - dot_idx);
-                            return path[..trimmed_len].into();
-                        }
-                    }
-                    path.clone()
-                })
+                .map(|path| Self::pages_route_key_from_debug_path(path))
                 .collect(),
         })
     }
@@ -285,8 +294,14 @@ impl DebugBuildPathsRouteKeys {
 
     fn should_include_pages_route(&self, route_key: &RcStr) -> bool {
         // Special pages router framework routes
-        if matches!(route_key.as_str(), "/_error" | "/_document" | "/_app") {
-            return true;
+        if matches!(
+            route_key.as_str(),
+            "/_error" | "/_document" | "/_app" | "/404" | "/500"
+        ) {
+            return self
+                .pages
+                .iter()
+                .any(|page| !page.as_str().starts_with("/api/"));
         }
         self.pages.contains(route_key)
     }
