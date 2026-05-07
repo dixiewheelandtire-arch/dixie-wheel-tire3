@@ -706,7 +706,11 @@ export async function handleAction({
 
   const actionWasForwarded = Boolean(req.headers['x-action-forwarded'])
 
-  if (actionId) {
+  // Only attempt forwarding if the action hasn't already been forwarded.
+  // Without this guard, middleware rewrites can cause the forwarded request
+  // to arrive at a worker that also wants to forward, creating an infinite
+  // request loop (#84504).
+  if (actionId && !actionWasForwarded) {
     const forwardedWorker = selectWorkerForForwarding(actionId, page)
 
     // If forwardedWorker is truthy, it means there isn't a worker for the action
@@ -848,11 +852,21 @@ export async function handleAction({
 
             const actionData = Buffer.concat(chunks).toString('utf-8')
 
-            boundActionArguments = await decodeReply(
-              actionData,
-              serverModuleMap,
-              { temporaryReferences }
-            )
+            try {
+              boundActionArguments = await decodeReply(
+                actionData,
+                serverModuleMap,
+                { temporaryReferences }
+              )
+            } catch (err) {
+              // Malformed request body (e.g. invalid JSON from vulnerability
+              // scanners) should return 400, not bubble up as 500 (#86945).
+              if (err instanceof SyntaxError) {
+                res.statusCode = 400
+                return
+              }
+              throw err
+            }
           }
         } else if (
           // The type check here ensures that `req` is correctly typed, and the
@@ -1057,11 +1071,21 @@ export async function handleAction({
 
             const actionData = Buffer.concat(chunks).toString('utf-8')
 
-            boundActionArguments = await decodeReply(
-              actionData,
-              serverModuleMap,
-              { temporaryReferences }
-            )
+            try {
+              boundActionArguments = await decodeReply(
+                actionData,
+                serverModuleMap,
+                { temporaryReferences }
+              )
+            } catch (err) {
+              // Malformed request body (e.g. invalid JSON from vulnerability
+              // scanners) should return 400, not bubble up as 500 (#86945).
+              if (err instanceof SyntaxError) {
+                res.statusCode = 400
+                return
+              }
+              throw err
+            }
           }
         } else {
           throw new Error('Invariant: Unknown request type.')
