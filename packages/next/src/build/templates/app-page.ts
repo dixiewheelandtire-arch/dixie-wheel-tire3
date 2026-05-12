@@ -708,7 +708,25 @@ export async function handler(
       resolvedPathname,
       interceptionRoutePatterns
     )
-    res.setHeader('Vary', varyHeader)
+    // Merge with any existing Vary header (e.g. set by middleware) instead
+    // of overwriting it. Overwriting breaks CDN cache invalidation when
+    // middleware adds custom Vary values like X-Foo (#85999).
+    const existingVary = res.getHeader('Vary')
+    if (existingVary && varyHeader) {
+      const existingValues =
+        (typeof existingVary === 'string' ? existingVary : String(existingVary))
+          .split(',')
+          .map((v) => v.trim().toLowerCase())
+      const newValues = varyHeader
+        .split(',')
+        .map((v) => v.trim())
+        .filter((v) => !existingValues.includes(v.toLowerCase()))
+      if (newValues.length > 0) {
+        res.appendHeader('Vary', newValues.join(', '))
+      }
+    } else {
+      res.setHeader('Vary', varyHeader)
+    }
     let parentSpan: Span | undefined
     const invokeRouteModule = async (
       span: Span | undefined,
@@ -1730,8 +1748,21 @@ export async function handler(
           delete headers[NEXT_CACHE_TAGS_HEADER]
         }
 
+        // Headers that support multiple values must use appendHeader;
+        // all others use setHeader to avoid duplicates when the render
+        // phase already set the same header (e.g. Location) (#82117).
+        const multiValueHeaders = new Set([
+          'set-cookie',
+          'www-authenticate',
+          'proxy-authenticate',
+          'vary',
+        ])
+
         for (let [key, value] of Object.entries(headers)) {
           if (typeof value === 'undefined') continue
+
+          const useAppend =
+            Array.isArray(value) || multiValueHeaders.has(key.toLowerCase())
 
           if (Array.isArray(value)) {
             for (const v of value) {
@@ -1739,9 +1770,17 @@ export async function handler(
             }
           } else if (typeof value === 'number') {
             value = value.toString()
-            res.appendHeader(key, value)
+            if (useAppend) {
+              res.appendHeader(key, value)
+            } else {
+              res.setHeader(key, value)
+            }
           } else {
-            res.appendHeader(key, value)
+            if (useAppend) {
+              res.appendHeader(key, value)
+            } else {
+              res.setHeader(key, value)
+            }
           }
         }
       }
