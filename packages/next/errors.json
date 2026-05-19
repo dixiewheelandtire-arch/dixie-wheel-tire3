@@ -1254,5 +1254,9 @@
   "1253": "\\`experimental.cssChunking: \"strict\"\\` is only supported with webpack. Please remove the option or run Next.js with webpack in %s.",
   "1254": "\\`experimental.cssChunking: false\\` is only supported with webpack. Please remove the option or run Next.js with webpack in %s.",
   "1255": "`next internal prewarm-dev` requires Turbopack. Make sure the project is configured to use Turbopack (this is the default).",
-  "1256": "Prewarm worker exited with code %s"
+  "1256": "Prewarm worker exited with code %s",
+  "1257": "Prewarm worker exited with code %s.",
+  "1258": "Unknown prewarm unit kind: %s",
+  "1259": "Prewarm worker terminated by signal %s.",
+  "1260": "next internal prewarm-dev: no entrypoints discovered in this project. Make sure the project has an `app/` or `pages/` directory."
 }
