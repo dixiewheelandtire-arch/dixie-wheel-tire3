@@ -1258,5 +1258,7 @@
   "1257": "Prewarm worker exited with code %s.",
   "1258": "Unknown prewarm unit kind: %s",
   "1259": "Prewarm worker terminated by signal %s.",
-  "1260": "next internal prewarm-dev: no entrypoints discovered in this project. Make sure the project has an `app/` or `pages/` directory."
+  "1260": "next internal prewarm-dev: no entrypoints discovered in this project. Make sure the project has an `app/` or `pages/` directory.",
+  "1261": "`next internal prewarm-dev` requires the Turbopack persistent dev cache. Enable it with `experimental.turbopackFileSystemCacheForDev: true` in next.config.",
+  "1262": "`next internal prewarm-dev` requires Turbopack; Rspack is not supported."
 }
