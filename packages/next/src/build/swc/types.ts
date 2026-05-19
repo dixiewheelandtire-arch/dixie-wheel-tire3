@@ -353,6 +353,19 @@ export interface Project {
 
   shutdown(): Promise<void>
 
+  /**
+   * Drive a snapshot+persist cycle on demand.  Forces the in-memory
+   * persistent cache to be written to disk regardless of idle state;
+   * the project remains usable afterwards.  Used by
+   * `next internal prewarm-dev`.
+   */
+  persistCache(): Promise<void>
+
+  /**
+   * Run the project's registered exit handlers (trace/profiling
+   * teardown).  Does NOT write the persistent cache — use
+   * `persistCache()` for that.  Must be called at most once per project.
+   */
   onExit(): Promise<void>
 }
 
