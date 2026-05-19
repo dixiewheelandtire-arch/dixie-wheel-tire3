@@ -229,6 +229,23 @@ impl<B: BackingStorage> TurboTasksBackend<B> {
     ) -> (bool, EvictionCounts) {
         self.0.snapshot_and_evict_for_testing(turbo_tasks)
     }
+
+    /// Run a snapshot+persist cycle synchronously, on demand.
+    ///
+    /// Unlike the background snapshot job (which is gated on idle timeouts
+    /// and the `ReadWrite` storage mode), this method runs the snapshot
+    /// regardless of idle state and works in any storage mode that has
+    /// `should_persist() == true` (`ReadWrite` and `ReadWriteOnShutdown`).
+    ///
+    /// Intended for callers like `next internal prewarm-dev` that drive
+    /// persistence on their own schedule and disable the idle scheduler
+    /// (by running with `ReadWriteOnShutdown`).
+    pub fn snapshot_and_persist_now(
+        &self,
+        turbo_tasks: &dyn TurboTasksBackendApi<TurboTasksBackend<B>>,
+    ) -> Result<(), anyhow::Error> {
+        self.0.snapshot_and_persist_now(turbo_tasks)
+    }
 }
 
 impl<B: BackingStorage> TurboTasksBackendInner<B> {
@@ -330,6 +347,22 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         };
         let counts = self.storage.evict_after_snapshot(None);
         (had_new_data, counts)
+    }
+
+    /// Public entry point for [`TurboTasksBackend::snapshot_and_persist_now`].
+    ///
+    /// Asserts that the backend is in a persisting storage mode; callers
+    /// that may not be persisting should check `should_persist()` first.
+    pub fn snapshot_and_persist_now(
+        &self,
+        turbo_tasks: &dyn TurboTasksBackendApi<TurboTasksBackend<B>>,
+    ) -> Result<(), anyhow::Error> {
+        assert!(
+            self.should_persist(),
+            "snapshot_and_persist_now requires persistence"
+        );
+        self.snapshot_and_persist(None, "explicit", turbo_tasks)
+            .map(|_| ())
     }
 
     fn should_restore(&self) -> bool {
