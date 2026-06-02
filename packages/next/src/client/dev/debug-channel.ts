@@ -202,3 +202,16 @@ export function createDebugChannel(
 
   return { readable }
 }
+
+export function closeAllDebugChannels(): void {
+  for (const pair of pairs.values()) {
+    try {
+      pair.writer.ready.then(() => pair.writer.close()).catch(() => {})
+    } catch {}
+  }
+  pairs.clear()
+}
+
+export function resetDebugChannelState(): void {
+  initialDocumentDebugChunks = []
+}
