@@ -5,7 +5,7 @@
 // TODO: Use tsconfig#paths instead
 declare module 'next/dist/compiled/next-devtools'
 
-declare module 'next/dist/compiled/webpack/webpack' {
+declare module 'next/dist/webpack/compiled/webpack/webpack' {
   export function init(): void
   export let BasicEvaluatedExpression: any
   export let GraphHelpers: any
@@ -63,6 +63,34 @@ declare module 'next/dist/compiled/amphtml-validator' {
   }
   export function getInstance(validatorPath: string): Promise<Validator>
   export type ValidationError = any
+}
+
+declare module 'next/dist/compiled/source-map08' {
+  export type NullableMappedPosition = any
+  export type RawSourceMap = any
+  export const SourceMapConsumer: any
+}
+
+declare module 'next/dist/compiled/ws' {
+  class WebSocket {}
+  namespace WebSocket {
+    export class Server {}
+  }
+  export = WebSocket
+}
+
+declare module 'next/dist/compiled/@modelcontextprotocol/sdk/server/mcp' {
+  export class McpServer {
+    constructor(...args: any[])
+  }
+}
+
+declare module 'next/dist/compiled/edge-runtime' {
+  export class EdgeRuntime<T = any> {
+    constructor(...args: any[])
+    context: T
+    evaluate(code: string): any
+  }
 }
 
 declare module 'react-server-dom-webpack/server'

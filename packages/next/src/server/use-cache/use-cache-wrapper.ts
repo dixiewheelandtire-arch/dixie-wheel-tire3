@@ -43,7 +43,7 @@ import {
   makeHangingPromise,
 } from '../dynamic-rendering-utils'
 
-import type { ClientReferenceManifest } from '../../build/webpack/plugins/flight-manifest-plugin'
+import type { ClientReferenceManifest } from '../../build/manifests'
 
 import {
   getClientReferenceManifest,
