@@ -47,6 +47,8 @@ export type ImageProps = Omit<
   blurDataURL?: string
   unoptimized?: boolean
   overrideSrc?: string
+  imageRendering?: '-webkit-optimize-contrast' | 'auto' | 'crisp-edges' | 'pixelated' | 'smooth' | string
+
   /**
    * @deprecated Use `onLoad` instead.
    * @see https://nextjs.org/docs/app/api-reference/components/image#onload
@@ -310,6 +312,7 @@ export function getImgProps(
     objectPosition,
     lazyBoundary,
     lazyRoot,
+    imageRendering = "-webkit-optimize-contrast",
     ...rest
   }: ImageProps,
   _state: {
@@ -695,6 +698,7 @@ export function getImgProps(
         }
       : {},
     showAltText ? {} : { color: 'transparent' },
+    { imageRendering },
     style
   )
 
