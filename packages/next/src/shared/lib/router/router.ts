@@ -2067,7 +2067,7 @@ export default class Router implements BaseRouter {
           asPath: isNotFound ? '/404' : resolvedAs,
           locale,
         }),
-        hasMiddleware: true,
+        hasMiddleware,
         isServerRender: this.isSsr,
         parseJSON: true,
         inflightCache: isBackground ? this.sbc : this.sdc,
