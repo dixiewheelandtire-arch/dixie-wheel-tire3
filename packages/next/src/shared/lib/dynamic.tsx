@@ -63,7 +63,7 @@ export function noSSR<P = {}>(
     return LoadableInitializer(loadableOptions)
   }
 
-  const Loading = loadableOptions.loading!
+  const Loading = loadableOptions.loading || (() => null)
   // This will only be rendered on the server side
   return () => (
     <Loading error={null} isLoading pastDelay={false} timedOut={false} />
