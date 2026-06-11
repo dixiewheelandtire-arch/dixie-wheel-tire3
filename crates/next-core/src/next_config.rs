@@ -8,8 +8,8 @@ use serde_json::Value as JsonValue;
 use turbo_esregex::EsRegex;
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{
-    FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, TaskInput, Vc, debug::ValueDebugFormat,
-    trace::TraceRawVcs,
+    FxIndexMap, NonLocalValue, OperationValue, ResolvedVc, TryJoinIterExt, Vc,
+    debug::ValueDebugFormat, trace::TraceRawVcs,
 };
 use turbo_tasks_env::EnvMap;
 use turbo_tasks_fetch::FetchClientConfig;
@@ -26,6 +26,7 @@ use turbopack_core::{
     issue::{
         IgnoreIssue, IgnoreIssuePattern, Issue, IssueExt, IssueSeverity, IssueStage, StyledString,
     },
+    module_graph::style_groups::StyleGroupsAlgorithm,
     resolve::ResolveAliasMap,
 };
 use turbopack_ecmascript::{OptionTreeShaking, TreeShakingMode};
@@ -42,7 +43,13 @@ use crate::{
     next_shared::{
         transforms::ModularizeImportPackageConfig, webpack_rules::WebpackLoaderBuiltinCondition,
     },
+    util::relativize_glob,
 };
+
+/// Name of the directory at the project root where CPU profiles are written when profiling is
+/// enabled (see the `--cpu-prof` CLI flag). It is a fixed-name sibling of `distDir`, not
+/// configurable. Kept here so the bundler and the napi bindings agree on the path.
+pub const DIST_PROFILES_DIR_NAME: &str = ".next-profiles";
 
 #[turbo_tasks::value(transparent)]
 pub struct ModularizeImports(
@@ -95,6 +102,7 @@ pub struct NextConfig {
     experimental: ExperimentalConfig,
     images: ImageConfig,
     page_extensions: Vec<RcStr>,
+    instrumentation_client_inject: Option<Vec<RcStr>>,
     react_compiler: Option<ReactCompilerOptionsOrBoolean>,
     react_production_profiling: Option<bool>,
     react_strict_mode: Option<bool>,
@@ -347,6 +355,7 @@ pub enum OutputType {
 #[turbo_tasks::value(transparent)]
 pub struct OptionOutputType(Option<OutputType>);
 
+#[turbo_tasks::task_input]
 #[derive(
     Debug,
     Clone,
@@ -355,11 +364,9 @@ pub struct OptionOutputType(Option<OutputType>);
     PartialEq,
     Ord,
     PartialOrd,
-    TaskInput,
     TraceRawVcs,
     Serialize,
     Deserialize,
-    NonLocalValue,
     OperationValue,
     Encode,
     Decode,
@@ -1040,6 +1047,135 @@ pub struct TurbopackIgnoreIssueRule {
     pub description: Option<TurbopackIgnoreIssueTextPattern>,
 }
 
+/// `experimental.cssChunking` accepts the following shapes (all normalized to a single canonical
+/// object form via [`CssChunkingConfig::normalize`]):
+///
+/// * `true` — equivalent to `{ type: "loose" }` (default loose behaviour).
+/// * `false` — disabled chunking.
+/// * `"strict"` / `"loose"` / `"graph"` — string shorthands.
+/// * `{ type: "strict" }` / `{ type: "loose" }` — object form for the legacy modes.
+/// * `{ type: "graph", requestCost?, moduleFactorCost? }` — object form for the graph algorithm.
+#[derive(
+    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
+)]
+#[serde(untagged)]
+pub enum CssChunkingConfig {
+    Bool(bool),
+    String(CssChunkingMode),
+    Object(CssChunkingObject),
+}
+
+/// String shorthand variants for [`CssChunkingConfig`].
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum CssChunkingMode {
+    Strict,
+    Loose,
+    Graph,
+}
+
+/// Object form of `experimental.cssChunking`.
+///
+/// `None` is the normalized representation of `false` ("CSS chunking is disabled"). It is not
+/// reachable through deserialization — users write `false`, not `{ type: "none" }`.
+#[derive(
+    Clone, Debug, PartialEq, Deserialize, TraceRawVcs, NonLocalValue, OperationValue, Encode, Decode,
+)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum CssChunkingObject {
+    #[serde(skip)]
+    None,
+    Strict,
+    Loose,
+    Graph(CssChunkingGraphOptions),
+}
+
+/// Cost parameters for the graph algorithm. See [`CssChunkingConfig`] for details.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Deserialize,
+    TraceRawVcs,
+    NonLocalValue,
+    OperationValue,
+    Encode,
+    Decode,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct CssChunkingGraphOptions {
+    pub request_cost: Option<f32>,
+    pub module_factor_cost: Option<f32>,
+}
+
+impl CssChunkingConfig {
+    /// Normalize all input shapes (booleans, strings, object form) to the canonical object form.
+    /// `false` maps to [`CssChunkingObject::None`]; `true` is equivalent to `'loose'`.
+    pub fn normalize(&self) -> CssChunkingObject {
+        match self {
+            CssChunkingConfig::Bool(false) => CssChunkingObject::None,
+            CssChunkingConfig::Bool(true) => CssChunkingObject::Loose,
+            CssChunkingConfig::String(CssChunkingMode::Strict) => CssChunkingObject::Strict,
+            CssChunkingConfig::String(CssChunkingMode::Loose) => CssChunkingObject::Loose,
+            CssChunkingConfig::String(CssChunkingMode::Graph) => {
+                CssChunkingObject::Graph(CssChunkingGraphOptions::default())
+            }
+            CssChunkingConfig::Object(obj) => obj.clone(),
+        }
+    }
+}
+
+/// Default `requestCost` for the graph algorithm (in bytes).
+const DEFAULT_REQUEST_COST: f32 = 20_000.0;
+/// Default `moduleFactorCost` for the graph algorithm.
+const DEFAULT_MODULE_FACTOR_COST: f32 = 1.0;
+
+/// Resolve `experimental.cssChunking` to the [`StyleGroupsAlgorithm`] Turbopack should use.
+///
+/// `strict` and `false` (`CssChunkingObject::None`) are bundler-incompatible with Turbopack and
+/// are rejected at config-validation time on the JS side; if one slips through, we bail rather
+/// than silently falling back. `loose` and `true` map to [`StyleGroupsAlgorithm::Default`].
+fn resolve_css_chunking_algorithm(
+    config: Option<&CssChunkingConfig>,
+) -> Result<StyleGroupsAlgorithm> {
+    let Some(config) = config else {
+        return Ok(StyleGroupsAlgorithm::Default);
+    };
+    Ok(match config.normalize() {
+        CssChunkingObject::None => {
+            anyhow::bail!(
+                "`experimental.cssChunking: false` is not supported by Turbopack; this should \
+                 have been rejected at config validation time"
+            )
+        }
+        CssChunkingObject::Strict => {
+            anyhow::bail!(
+                "`experimental.cssChunking: \"strict\"` is not supported by Turbopack; this \
+                 should have been rejected at config validation time"
+            )
+        }
+        CssChunkingObject::Loose => StyleGroupsAlgorithm::Default,
+        CssChunkingObject::Graph(opts) => StyleGroupsAlgorithm::graph(
+            opts.request_cost.unwrap_or(DEFAULT_REQUEST_COST),
+            opts.module_factor_cost
+                .unwrap_or(DEFAULT_MODULE_FACTOR_COST),
+        ),
+    })
+}
+
 #[derive(
     Clone,
     Debug,
@@ -1089,13 +1225,15 @@ pub struct ExperimentalConfig {
     /// This field is kept for backwards compatibility during migration.
     cache_components: Option<bool>,
     use_cache: Option<bool>,
-    root_params: Option<bool>,
     runtime_server_deployment_id: Option<bool>,
     supports_immutable_assets: Option<bool>,
 
     /// A salt to mix into chunk and asset content hashes. Empty string means
     /// no salt.
     output_hash_salt: Option<RcStr>,
+
+    /// CSS chunking strategy. See [`CssChunkingConfig`] for the accepted shapes.
+    css_chunking: Option<CssChunkingConfig>,
 
     // ---
     // UNSUPPORTED
@@ -1472,7 +1610,7 @@ pub struct OptionSubResourceIntegrity(Option<SubResourceIntegrity>);
 pub struct OptionFileSystemPath(Option<FileSystemPath>);
 
 #[turbo_tasks::value(transparent)]
-pub struct IgnoreIssues(Vec<IgnoreIssue>);
+pub struct IgnoreIssues(Box<[IgnoreIssue]>);
 
 #[turbo_tasks::value(transparent)]
 pub struct OptionJsonValue(
@@ -1558,6 +1696,53 @@ impl Issue for InvalidLoaderRuleConditionIssue {
 
     fn documentation_link(&self) -> RcStr {
         turbopack_config_documentation_link()
+    }
+}
+
+#[turbo_tasks::value(transparent)]
+pub struct OutputFileTracingIncludesExcludes(
+    #[bincode(with = "turbo_bincode::indexmap")]
+    FxIndexMap<ResolvedVc<Glob>, Vec<(RcStr, FileSystemPath)>>,
+);
+
+impl OutputFileTracingIncludesExcludes {
+    pub async fn parse(
+        project_path: FileSystemPath,
+        value: &Option<serde_json::Value>,
+    ) -> Result<OutputFileTracingIncludesExcludes> {
+        if let Some(value) = value
+            && let Some(map) = value.as_object()
+        {
+            Ok(OutputFileTracingIncludesExcludes(
+                map.iter()
+                    .map(async |(route_pattern, file_patterns)| {
+                        let route_pattern = Glob::new(
+                            RcStr::from(route_pattern.clone()),
+                            GlobOptions { contains: true },
+                        )
+                        .to_resolved()
+                        .await?;
+                        let file_patterns = file_patterns
+                            .as_array()
+                            .iter()
+                            .flat_map(|pattern| pattern.iter())
+                            .filter_map(|pattern| pattern.as_str())
+                            .map(async |pattern_str| {
+                                let (glob, root) = relativize_glob(pattern_str, &project_path)?;
+                                Ok((RcStr::from(glob), root))
+                            })
+                            .try_join()
+                            .await?;
+                        Ok((route_pattern, file_patterns))
+                    })
+                    .try_join()
+                    .await?
+                    .into_iter()
+                    .collect(),
+            ))
+        } else {
+            Ok(OutputFileTracingIncludesExcludes(FxIndexMap::default()))
+        }
     }
 }
 
@@ -1661,6 +1846,15 @@ impl NextConfig {
         let mut extensions = self.page_extensions.clone();
         extensions.sort_by_key(|ext| std::cmp::Reverse(ext.len()));
         Vc::cell(extensions)
+    }
+
+    #[turbo_tasks::function]
+    pub fn instrumentation_client_inject(&self) -> Vc<Vec<RcStr>> {
+        Vc::cell(
+            self.instrumentation_client_inject
+                .clone()
+                .unwrap_or_default(),
+        )
     }
 
     #[turbo_tasks::function]
@@ -1815,6 +2009,13 @@ impl NextConfig {
     #[turbo_tasks::function]
     pub fn inline_css(&self) -> Vc<bool> {
         Vc::cell(self.experimental.inline_css.unwrap_or(false))
+    }
+
+    /// Resolve `experimental.cssChunking` to a [`StyleGroupsAlgorithm`] (with defaults applied
+    /// for the cost parameters of the graph algorithm).
+    #[turbo_tasks::function]
+    pub fn css_chunking(&self) -> Result<Vc<StyleGroupsAlgorithm>> {
+        Ok(resolve_css_chunking_algorithm(self.experimental.css_chunking.as_ref())?.cell())
     }
 
     #[turbo_tasks::function]
@@ -2025,16 +2226,6 @@ impl NextConfig {
                 // "use cache" was originally implicitly enabled with the
                 // cacheComponents flag, so we transfer the value for cacheComponents to the
                 // explicit useCache flag to ensure backwards compatibility.
-                .unwrap_or(self.cache_components.unwrap_or(false)),
-        )
-    }
-
-    #[turbo_tasks::function]
-    pub fn enable_root_params(&self) -> Vc<bool> {
-        Vc::cell(
-            self.experimental
-                .root_params
-                // rootParams should be enabled implicitly in cacheComponents.
                 .unwrap_or(self.cache_components.unwrap_or(false)),
         )
     }
@@ -2341,13 +2532,29 @@ impl NextConfig {
     }
 
     #[turbo_tasks::function]
-    pub fn output_file_tracing_includes(&self) -> Vc<OptionJsonValue> {
-        Vc::cell(self.output_file_tracing_includes.clone())
+    pub async fn output_file_tracing_includes(
+        &self,
+        project_path: FileSystemPath,
+    ) -> Result<Vc<OutputFileTracingIncludesExcludes>> {
+        Ok(OutputFileTracingIncludesExcludes::parse(
+            project_path,
+            &self.output_file_tracing_includes,
+        )
+        .await?
+        .cell())
     }
 
     #[turbo_tasks::function]
-    pub fn output_file_tracing_excludes(&self) -> Vc<OptionJsonValue> {
-        Vc::cell(self.output_file_tracing_excludes.clone())
+    pub async fn output_file_tracing_excludes(
+        &self,
+        project_path: FileSystemPath,
+    ) -> Result<Vc<OutputFileTracingIncludesExcludes>> {
+        Ok(OutputFileTracingIncludesExcludes::parse(
+            project_path,
+            &self.output_file_tracing_excludes,
+        )
+        .await?
+        .cell())
     }
 
     #[turbo_tasks::function]
@@ -2392,7 +2599,7 @@ impl NextConfig {
                         .transpose()?,
                 })
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<_>>()?;
         Ok(Vc::cell(rules))
     }
 

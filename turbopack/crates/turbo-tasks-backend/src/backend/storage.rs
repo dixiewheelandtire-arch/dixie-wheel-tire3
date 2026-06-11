@@ -12,7 +12,7 @@ use std::{
 use thread_local::ThreadLocal;
 use tracing::span::Id;
 use turbo_bincode::TurboBincodeBuffer;
-use turbo_tasks::{FxDashMap, TaskId, backend::CachedTaskType, event::Event, parallel};
+use turbo_tasks::{FxDashMap, TaskId, backend::CachedTaskTypeArc, event::Event, parallel};
 
 use crate::{
     backend::storage_schema::{
@@ -89,14 +89,6 @@ impl Display for EvictionCounts {
 }
 
 impl TaskDataCategory {
-    pub fn into_specific(self) -> SpecificTaskDataCategory {
-        match self {
-            TaskDataCategory::Meta => SpecificTaskDataCategory::Meta,
-            TaskDataCategory::Data => SpecificTaskDataCategory::Data,
-            TaskDataCategory::All => unreachable!(),
-        }
-    }
-
     pub fn includes_data(self) -> bool {
         matches!(self, TaskDataCategory::Data | TaskDataCategory::All)
     }
@@ -183,7 +175,7 @@ pub struct Storage {
     /// This is backed by the TaskCache table in the database.
     ///
     /// LockOrdering: See the comments on [map].
-    pub task_cache: FxDashMap<Arc<CachedTaskType>, TaskId>,
+    pub task_cache: FxDashMap<CachedTaskTypeArc, TaskId>,
 }
 
 impl Storage {
@@ -253,7 +245,7 @@ impl Storage {
     /// Mark a newly allocated task as restored (skip DB queries) and new (include in persistence
     /// snapshots). Optionally sets the `persistent_task_type` eagerly so it's available for
     /// persistence snapshots without needing to propagate it through `connect_child`.
-    pub fn initialize_new_task(&self, task_id: TaskId, task_type: Option<Arc<CachedTaskType>>) {
+    pub fn initialize_new_task(&self, task_id: TaskId, task_type: Option<CachedTaskTypeArc>) {
         let mut task = self.access_mut(task_id);
         task.flags.set_restored(TaskDataCategory::All);
         task.flags.set_new_task(true);
@@ -516,7 +508,7 @@ impl Storage {
             // was contended. We defer them until after the map shard lock is released to
             // avoid a lock cycle with get_or_create_persistent_task, which takes task_cache
             // before map. Allocated lazily on first conflict.
-            let mut deferred_task_cache_removals: Vec<Arc<CachedTaskType>> = Vec::new();
+            let mut deferred_task_cache_removals: Vec<CachedTaskTypeArc> = Vec::new();
             // SAFETY: We hold the write lock for the duration of iteration.
             for bucket in unsafe { shard.iter() } {
                 // SAFETY: The write lock guard outlives the bucket reference.

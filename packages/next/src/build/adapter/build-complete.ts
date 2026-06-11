@@ -43,6 +43,7 @@ import {
 } from '../../lib/constants'
 
 import { normalizeLocalePath } from '../../shared/lib/i18n/normalize-locale-path'
+import { getStaticMetadataPrerenderPathname } from '../../lib/metadata/get-metadata-route'
 import { isStaticMetadataFile } from '../../lib/metadata/is-metadata-route'
 import { addPathPrefix } from '../../shared/lib/router/utils/add-path-prefix'
 import { getRedirectStatus, modifyRouteRegex } from '../../lib/redirect-status'
@@ -52,6 +53,7 @@ import { sortSortableRoutes } from '../../shared/lib/router/utils/sortable-route
 import { defaultOverrides } from '../../server/require-hook'
 import { generateRoutesManifest } from '../generate-routes-manifest'
 import { Bundler } from '../../lib/bundler'
+import { resolveCacheHandlerPathToFilesystem } from '../../lib/format-dynamic-import-path'
 
 interface SharedRouteFields {
   /**
@@ -379,6 +381,10 @@ export interface NextAdapter {
        * nextVersion is the current version of Next.js being used
        */
       nextVersion: string
+      /**
+       * projectDir is the absolute directory the Next.js application is in
+       */
+      projectDir: string
     }
   ) => Promise<NextConfigComplete> | NextConfigComplete
   onBuildComplete?: (ctx: {
@@ -577,6 +583,7 @@ export async function handleBuildComplete({
         tracingRoot,
         bundler,
         hasInstrumentationHook,
+        config,
       })
 
       async function handleTraceFiles(
@@ -669,6 +676,7 @@ export async function handleBuildComplete({
           wasmAssets: {},
           config: {
             env: page.env,
+            preferredRegion: page.regions,
           },
         }
 
@@ -984,19 +992,17 @@ export async function handleBuildComplete({
           // Dynamic metadata routes (e.g. robots/sitemap using connection())
           // should remain app routes in adapter outputs.
           const isStaticMetadataRoute = isStaticMetadataFile(normalizedPage)
+          const staticMetadataPrerenderPathname =
+            getStaticMetadataPrerenderPathname(normalizedPage) ?? normalizedPage
           const isPrerenderedMetadataRoute =
-            prerenderManifest.routes[normalizedPage] ||
-            prerenderManifest.dynamicRoutes[normalizedPage] ||
+            prerenderManifest.routes[staticMetadataPrerenderPathname] ||
             config.i18n?.locales?.some((locale) => {
               const localePathname = path.posix.join(
                 '/',
                 locale,
-                normalizedPage.slice(1)
+                staticMetadataPrerenderPathname.slice(1)
               )
-              return (
-                prerenderManifest.routes[localePathname] ||
-                prerenderManifest.dynamicRoutes[localePathname]
-              )
+              return prerenderManifest.routes[localePathname]
             })
 
           if (isStaticMetadataRoute && isPrerenderedMetadataRoute) {
@@ -1518,6 +1524,10 @@ export async function handleBuildComplete({
       }
 
       for (const dynamicRoute in prerenderManifest.dynamicRoutes) {
+        if (isStaticMetadataFile(dynamicRoute)) {
+          continue
+        }
+
         const {
           fallback,
           fallbackExpire,
@@ -1543,10 +1553,7 @@ export async function handleBuildComplete({
             (item) => item.page === dynamicRoute
           )?.routeKeys || {}
         const allowQuery = Object.values(routeKeys)
-        const partialFallbacksEnabled =
-          config.experimental.partialFallbacks === true
         const partialFallback =
-          partialFallbacksEnabled &&
           isAppPage &&
           remainingPrerenderableParams !== undefined &&
           remainingPrerenderableParams.length > 0 &&
@@ -1573,7 +1580,7 @@ export async function handleBuildComplete({
           // RSC shell.
           else if (meta.postponed) {
             // If there's postponed fallback content, we usually collapse to a shared shell (`[]`).
-            // For opt-in partial fallbacks in cache components, keep only the
+            // For partial fallbacks in cache components, keep only the
             // params that can still complete this shell.
             const remainingPrerenderableQueryKeys = new Set(
               (remainingPrerenderableParams ?? []).map(
@@ -2121,6 +2128,7 @@ async function getSharedNodeAssets({
   tracingRoot,
   requiredServerFiles,
   hasInstrumentationHook,
+  config,
 }: {
   dir: string
   bundler: Bundler
@@ -2128,6 +2136,7 @@ async function getSharedNodeAssets({
   tracingRoot: string
   requiredServerFiles: string[]
   hasInstrumentationHook: boolean
+  config: NextConfigComplete
 }) {
   const sharedNodeAssets: Record<string, string> = {}
   const sharedNodeAssetsHashes: Record<string, string> = {}
@@ -2194,6 +2203,7 @@ async function getSharedNodeAssets({
     bundler
   )
 
+  // Turbopack handles this automatically and these files are listed in the nft.json files.
   if (bundler !== Bundler.Turbopack) {
     const { nodeFileTrace } =
       require('next/dist/compiled/@vercel/nft') as typeof import('next/dist/compiled/@vercel/nft')
@@ -2226,11 +2236,39 @@ async function getSharedNodeAssets({
       ...Object.values(defaultOverrides).filter((item) => path.extname(item)),
     ]
 
+    const { cacheHandler, cacheHandlers } = config
+    // ensure we trace any dependencies needed for a custom incremental cache handler
+    if (cacheHandler) {
+      const resolvedPath = resolveCacheHandlerPathToFilesystem(cacheHandler)
+      necessaryNodeDependencies.push(
+        require.resolve(
+          path.isAbsolute(resolvedPath)
+            ? resolvedPath
+            : path.join(dir, resolvedPath)
+        )
+      )
+    }
+    if (cacheHandlers) {
+      for (const handlerPath of Object.values(cacheHandlers)) {
+        if (handlerPath) {
+          const resolvedPath = resolveCacheHandlerPathToFilesystem(handlerPath)
+          necessaryNodeDependencies.push(
+            require.resolve(
+              path.isAbsolute(resolvedPath)
+                ? resolvedPath
+                : path.join(dir, resolvedPath)
+            )
+          )
+        }
+      }
+    }
+
     const { fileList, esmFileList } = await nodeFileTrace(
       necessaryNodeDependencies,
       {
         base: tracingRoot,
         ignore: sharedIgnoreFn,
+        moduleSyncCatchall: true,
       }
     )
     esmFileList.forEach((item) => fileList.add(item))
