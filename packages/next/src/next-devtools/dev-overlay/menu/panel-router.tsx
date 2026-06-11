@@ -329,7 +329,7 @@ export const PanelRouter = () => {
             }}
             header={<DevToolsHeader title="Route Info" />}
           >
-            <PageSegmentTree page={state.page} />
+            <PageSegmentTree page={decodeURIComponent(state.page)} />
           </DynamicPanel>
         </PanelRoute>
       )}
