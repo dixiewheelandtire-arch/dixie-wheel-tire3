@@ -2,10 +2,15 @@ import { nextTestSetup } from 'e2e-utils'
 import { waitForNoErrorToast } from 'next-test-utils'
 import { join } from 'node:path'
 
+const appShellsEnabled = !!process.env.NEXT_TEST_ENABLE_APP_SHELLS
+
 describe('instant validation - opting out of static shells', () => {
   const { next, skipped, isNextDev } = nextTestSetup({
     files: join(__dirname, 'fixtures', 'valid'),
     skipDeployment: true,
+    env: {
+      NEXT_TEST_ENABLE_APP_SHELLS: appShellsEnabled ? '1' : '',
+    },
   })
   if (skipped) return
 
@@ -35,6 +40,9 @@ describe('instant validation', () => {
       files: join(__dirname, 'fixtures', 'invalid-blocking-page-below-static'),
       skipStart: true,
       skipDeployment: true,
+      env: {
+        NEXT_TEST_ENABLE_APP_SHELLS: appShellsEnabled ? '1' : '',
+      },
     })
     if (skipped) return
 

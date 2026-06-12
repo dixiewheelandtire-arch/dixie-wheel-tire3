@@ -1,9 +1,14 @@
 import { nextTestSetup } from 'e2e-utils'
 import { retry, waitFor } from 'next-test-utils'
 
+const appShellsEnabled = !!process.env.NEXT_TEST_ENABLE_APP_SHELLS
+
 describe('cache-components-dev-streaming', () => {
   const { next } = nextTestSetup({
     files: __dirname,
+    env: {
+      NEXT_TEST_ENABLE_APP_SHELLS: appShellsEnabled ? '1' : '',
+    },
   })
 
   it('should stream suspense boundaries while filling caches in the background', async () => {

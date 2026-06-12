@@ -6,11 +6,16 @@ import {
   parseValidationMessages,
 } from 'e2e-utils/instant-validation'
 
+const appShellsEnabled = !!process.env.NEXT_TEST_ENABLE_APP_SHELLS
+
 describe('instant-validation-build', () => {
   const { next, skipped, isNextStart, isTurbopack } = nextTestSetup({
     files: __dirname,
     skipStart: true,
     skipDeployment: true,
+    env: {
+      NEXT_TEST_ENABLE_APP_SHELLS: appShellsEnabled ? '1' : '',
+    },
   })
 
   if (skipped) {
