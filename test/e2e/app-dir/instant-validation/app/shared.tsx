@@ -2,6 +2,11 @@ import { cacheLife } from 'next/cache'
 import Link from 'next/link'
 import { setTimeout } from 'timers/promises'
 
+export function RootLayoutTimestamp() {
+  const timestamp = performance.timeOrigin + performance.now()
+  return <div id="root-layout-timestamp">{timestamp}</div>
+}
+
 export function DebugLinks({ href }: { href: string }) {
   return (
     <span>
