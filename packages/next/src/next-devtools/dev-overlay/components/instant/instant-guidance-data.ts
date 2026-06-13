@@ -68,6 +68,34 @@ export type Snippet = {
 
 // ── Blocking-route cards ──────────────────────────
 
+const linkCards: FixCard[] = [
+  {
+    id: 'wrap-in-or-move-into-suspense',
+    title: 'Wrap in or move into Suspense',
+    group: 'stream',
+    // TODO(app-shells): doc links
+    link: 'https://nextjs.org/docs/messages/blocking-prerender-runtime#wrap-in-or-move-into-suspense',
+    snippets: [
+      { text: '<Suspense fallback={…}>', highlight: true },
+      { text: '  <DataChild />' },
+      { text: '</Suspense>', highlight: true },
+    ],
+    copyable: true,
+  },
+  {
+    id: 'allow-blocking-route',
+    title: 'Allow blocking route',
+    group: 'block',
+    // TODO(app-shells): doc links
+    link: 'https://nextjs.org/docs/messages/blocking-prerender-runtime#allow-blocking-route',
+    snippets: [
+      { text: '// page.tsx or layout.tsx' },
+      { text: 'export const instant = false', highlight: true },
+    ],
+    copyable: true,
+  },
+]
+
 const runtimeCards: FixCard[] = [
   {
     id: 'wrap-in-or-move-into-suspense',
@@ -298,6 +326,10 @@ const metadataRuntimeCards: FixCard[] = [
   },
 ]
 
+// TODO(app-shells): docs anchors for link data errors
+// TODO(app-shells): make sure these suggestions make sense
+const metadataLinkCards = metadataRuntimeCards
+
 const metadataDynamicCards: FixCard[] = [
   {
     id: 'cache-the-metadata',
@@ -351,6 +383,10 @@ const viewportRuntimeCards: FixCard[] = [
     copyable: true,
   },
 ]
+
+// TODO(app-shells): docs anchors for link data errors
+// TODO(app-shells): make sure these suggestions make sense
+const viewportLinkCards = viewportRuntimeCards
 
 const viewportDynamicCards: FixCard[] = [
   {
@@ -615,7 +651,7 @@ export type GuidanceKind =
   | 'sync-io-client'
   | 'unrendered-segment'
 
-export type GuidanceVariant = 'runtime' | 'dynamic'
+export type GuidanceVariant = 'link' | 'runtime' | 'dynamic'
 
 export const DOCS_URLS: Record<GuidanceKind, string> = {
   'blocking-route': 'https://nextjs.org/docs/messages/blocking-route',
@@ -745,15 +781,27 @@ export function getCards(
 ): FixCard[] {
   switch (kind) {
     case 'blocking-route':
-      return variant === 'dynamic' ? dynamicCards : runtimeCards
+      return variant === 'link'
+        ? linkCards
+        : variant === 'dynamic'
+          ? dynamicCards
+          : runtimeCards
     case 'client-hook':
       if (cause === 'useSearchParams()') return clientHookCardsSearchParams
       if (cause === 'useParams()') return clientHookCardsWithGsp
       return clientHookCardsNoGsp
     case 'metadata':
-      return variant === 'runtime' ? metadataRuntimeCards : metadataDynamicCards
+      return variant === 'link'
+        ? metadataLinkCards
+        : variant === 'runtime'
+          ? metadataRuntimeCards
+          : metadataDynamicCards
     case 'viewport':
-      return variant === 'runtime' ? viewportRuntimeCards : viewportDynamicCards
+      return variant === 'link'
+        ? viewportLinkCards
+        : variant === 'runtime'
+          ? viewportRuntimeCards
+          : viewportDynamicCards
     case 'sync-io':
       return (cause && syncCardsByCause[cause]) || []
     case 'sync-io-client':

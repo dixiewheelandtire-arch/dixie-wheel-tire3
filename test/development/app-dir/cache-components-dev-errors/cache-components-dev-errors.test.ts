@@ -8,9 +8,14 @@ import {
 } from 'next-test-utils'
 import { outdent } from 'outdent'
 
+const appShellsEnabled = !!process.env.NEXT_TEST_ENABLE_APP_SHELLS
+
 describe('Cache Components Dev Errors', () => {
   const { isTurbopack, next, isRspack } = nextTestSetup({
     files: __dirname,
+    env: {
+      NEXT_TEST_ENABLE_APP_SHELLS: appShellsEnabled ? '1' : '',
+    },
   })
 
   it('should show a red box error on the SSR render', async () => {
