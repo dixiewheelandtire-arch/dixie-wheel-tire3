@@ -229,6 +229,7 @@ pub mod test_utils {
 mod tests {
     use std::{mem::take, path::PathBuf, sync::Arc, time::Instant};
 
+    use bumpalo::boxed::Box as BumpBox;
     use parking_lot::Mutex;
     use rustc_hash::FxHashMap;
     use swc_core::{
@@ -253,7 +254,7 @@ mod tests {
     };
 
     use super::{
-        JsValue,
+        BumpVec, JsValue,
         graph::{ConditionalKind, Effect, EffectArg, EvalContext, VarGraph, create_graph},
         linker::link,
     };
@@ -468,7 +469,7 @@ mod tests {
                 let start = Instant::now();
                 async fn handle_args<'a>(
                     arena: &'a ThreadLocal<Bump>,
-                    args: Vec<EffectArg<'a>>,
+                    args: BumpVec<'a, EffectArg<'a>>,
                     queue: &mut Vec<(usize, Effect<'a>)>,
                     var_graph: &VarGraph<'a>,
                     var_cache: &Mutex<FxHashMap<Id, JsValue<'a>>>,
@@ -502,7 +503,13 @@ mod tests {
                                     .await
                                     .0,
                                 );
-                                queue.extend(effects.effects.into_iter().rev().map(|e| (i, e)));
+                                queue.extend(
+                                    BumpBox::into_inner(effects)
+                                        .effects
+                                        .into_iter()
+                                        .rev()
+                                        .map(|e| (i, e)),
+                                );
                             }
                             EffectArg::Spread => {
                                 new_args.push(JsValue::unknown_empty(true, rcstr!("spread")));
@@ -526,7 +533,7 @@ mod tests {
                         )
                         .await;
                         resolved.push((format!("{parent} -> {i} conditional"), condition));
-                        match *kind {
+                        match BumpBox::into_inner(kind) {
                             ConditionalKind::If { then } => {
                                 queue.extend(then.effects.into_iter().rev().map(|e| (i, e)));
                             }
