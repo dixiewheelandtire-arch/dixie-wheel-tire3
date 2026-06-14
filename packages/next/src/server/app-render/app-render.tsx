@@ -6710,8 +6710,15 @@ async function validateInstantConfigInBuildWithSample(
     fallbackRouteParams = fallbackRouteParamsMut
   }
 
-  const getDynamicParamFromSegment = makeGetDynamicParamFromSegment(
+  const interpolatedSampleParams = interpolateParallelRouteParams(
+    loaderTree,
     sampleParams,
+    outerCtx.pagePath,
+    fallbackRouteParams
+  )
+
+  const getDynamicParamFromSegment = makeGetDynamicParamFromSegment(
+    interpolatedSampleParams,
     fallbackRouteParams,
     false
   )
@@ -6774,7 +6781,7 @@ async function validateInstantConfigInBuildWithSample(
       workStore,
       parsedRequestHeaders: outerCtx.parsedRequestHeaders,
       getDynamicParamFromSegment,
-      interpolatedParams: sampleParams,
+      interpolatedParams: interpolatedSampleParams,
       query: sampleQuery,
       isPrefetch: false,
       isPossibleServerAction: false,
