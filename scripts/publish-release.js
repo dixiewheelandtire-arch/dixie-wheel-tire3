@@ -4,8 +4,6 @@
 const path = require('path')
 const execa = require('execa')
 const semver = require('semver')
-const { Sema } = require('async-sema')
-const { execSync } = require('child_process')
 const fs = require('fs')
 const {
   getGitHubToken,
@@ -13,47 +11,31 @@ const {
 } = require('./release-github-auth')
 
 const cwd = process.cwd()
+const dryRun = process.argv.includes('--dry-run')
+const maxPublishAttempts = 4
+const publishRetryDelaySeconds = 15
 
 ;(async function () {
-  let isCanary = true
-  let isReleaseCandidate = false
-  let isBeta = false
-
-  try {
-    const tagOutput = execSync(
-      `node ${path.join(__dirname, 'check-is-release.js')}`
-    ).toString()
-    console.log(tagOutput)
-
-    if (tagOutput.trim().startsWith('v')) {
-      isCanary = tagOutput.includes('-canary')
-    }
-    isReleaseCandidate = tagOutput.includes('-rc')
-    isBeta = tagOutput.includes('-beta')
-  } catch (err) {
-    console.log(err)
-
-    if (err.message && err.message.includes('no tag exactly matches')) {
-      console.log('Nothing to publish, exiting...')
-      return
-    }
-    throw err
+  const version = JSON.parse(
+    await fs.promises.readFile(path.join(cwd, 'lerna.json'), 'utf-8')
+  ).version
+  const parsedVersion = semver.parse(version)
+  if (parsedVersion === null) {
+    throw new Error(`Invalid version in lerna.json: ${version}`)
   }
+  console.log(
+    dryRun
+      ? `Dry run: not publishing ${version} to npm`
+      : `Publishing ${version}`
+  )
 
-  let tag = isCanary
-    ? 'canary'
-    : isReleaseCandidate
-      ? 'rc'
-      : isBeta
-        ? 'beta'
-        : 'latest'
+  const prereleaseChannel = parsedVersion.prerelease[0]
+  const isPrerelease = prereleaseChannel != null
+
+  let tag = isPrerelease ? String(prereleaseChannel) : 'latest'
 
   try {
-    if (!isCanary && !isReleaseCandidate && !isBeta) {
-      const version = JSON.parse(
-        await fs.promises.readFile(path.join(cwd, 'lerna.json'), 'utf-8')
-      ).version
-
+    if (!isPrerelease) {
       const res = await fetch(
         `https://registry.npmjs.org/-/package/next/dist-tags`
       )
@@ -65,7 +47,10 @@ const cwd = process.cwd()
         // during publishing, when users install `next@latest`, they might
         // get the backported version instead of the actual "latest" version.
         // Therefore, we explicitly set the tag as 'backport' for backports.
-        tag = 'backport'
+        // But force @latest tag if we accidentally tagged a prerelase as latest
+        if (!semver.prerelease(tags.latest)) {
+          tag = 'backport'
+        }
       }
     }
   } catch (error) {
@@ -75,76 +60,65 @@ const cwd = process.cwd()
 
   console.log(`Publishing as "${tag}" dist tag...`)
 
-  const packagesDir = path.join(cwd, 'packages')
-  const packageDirs = fs.readdirSync(packagesDir)
-  const publishSema = new Sema(2)
-
-  const publish = async (pkg, retry = 0) => {
-    let output = ''
+  // pnpm publish --recursive respects the workspace topological order,
+  // skips private packages, and skips packages whose version is already
+  // published. We wrap the whole invocation in a retry loop so transient
+  // registry failures don't abort the release.
+  const publish = async (attempt = 1) => {
     try {
-      await publishSema.acquire()
-      const child = execa(
-        `npm`,
+      await execa(
+        'pnpm',
         [
+          '--filter',
+          './packages/**',
           'publish',
-          `${path.join(packagesDir, pkg)}`,
+          '--recursive',
           '--access',
           'public',
+          '--no-git-checks',
           '--ignore-scripts',
+          '--report-summary',
           '--tag',
           tag,
+          ...(dryRun ? ['--dry-run'] : []),
         ],
-        { stdio: 'pipe' }
+        { stdio: 'inherit', cwd }
       )
-      const handleData = (type) => (chunk) => {
-        process[type].write(chunk)
-        output += chunk.toString()
-      }
-      child.stdout?.on('data', handleData('stdout'))
-      child.stderr?.on('data', handleData('stderr'))
-      // Return here to avoid retry logic
-      return await child
     } catch (err) {
-      console.error(`Failed to publish ${pkg}`, err)
-
-      if (
-        output.includes('cannot publish over the previously published versions')
-      ) {
-        console.error('Ignoring already published error', pkg)
-        return
-      }
-
-      if (retry >= 3) {
+      console.error(
+        `Publish attempt ${attempt} of ${maxPublishAttempts} failed`,
+        err
+      )
+      if (attempt >= maxPublishAttempts) {
         throw err
       }
-    } finally {
-      publishSema.release()
+      console.log(`retrying in ${publishRetryDelaySeconds}s`)
+      await new Promise((resolve) =>
+        setTimeout(resolve, publishRetryDelaySeconds * 1000)
+      )
+      await publish(attempt + 1)
     }
-    // Recursive call need to be outside of the publishSema
-    const retryDelaySeconds = 15
-    console.log(`retrying in ${retryDelaySeconds}s`)
-    await new Promise((resolve) =>
-      setTimeout(resolve, retryDelaySeconds * 1000)
-    )
-    await publish(pkg, retry + 1)
   }
 
   const undraft = async () => {
+    if (dryRun) {
+      console.log('Dry run: skipping GitHub release un-draft')
+      return
+    }
     const githubToken = getGitHubToken()
 
     if (!githubToken) {
       throw new Error(getGitHubTokenMissingMessage())
     }
 
-    if (isCanary) {
+    if (isPrerelease) {
       try {
         const ghHeaders = {
           Accept: 'application/vnd.github+json',
           Authorization: `Bearer ${githubToken}`,
           'X-GitHub-Api-Version': '2022-11-28',
         }
-        const { version: _version } = require('../lerna.json')
-        const version = `v${_version}`
+        const tag = `v${version}`
 
         let release
         let releasesData
@@ -161,9 +135,7 @@ const cwd = process.cwd()
             )
             releasesData = await releaseUrlRes.json()
 
-            release = releasesData.find(
-              (release) => release.tag_name === version
-            )
+            release = releasesData.find((release) => release.tag_name === tag)
           } catch (err) {
             console.log(`Fetching release failed`, err)
           }
@@ -183,12 +155,12 @@ const cwd = process.cwd()
           method: 'PATCH',
           body: JSON.stringify({
             draft: false,
-            name: version,
+            name: tag,
           }),
         })
 
         if (undraftRes.ok) {
-          console.log('un-drafted canary release successfully')
+          console.log(`un-drafted ${prereleaseChannel} release successfully`)
         } else {
           console.log(`Failed to undraft`, await undraftRes.text())
         }
@@ -198,25 +170,10 @@ const cwd = process.cwd()
     }
   }
 
-  const results = await Promise.allSettled(
-    packageDirs.map(async (packageDir) => {
-      const pkgJson = JSON.parse(
-        await fs.promises.readFile(
-          path.join(packagesDir, packageDir, 'package.json'),
-          'utf-8'
-        )
-      )
-
-      if (pkgJson.private) {
-        console.log(`Skipping private package ${packageDir}`)
-        return
-      }
-      await publish(packageDir)
-    })
-  )
-
-  if (results.some((item) => item.status === 'rejected')) {
-    console.error(`Not all packages published successfully`, results)
+  try {
+    await publish()
+  } catch (err) {
+    console.error('Publish failed after all retries', err)
     process.exit(1)
   }
   await undraft()
