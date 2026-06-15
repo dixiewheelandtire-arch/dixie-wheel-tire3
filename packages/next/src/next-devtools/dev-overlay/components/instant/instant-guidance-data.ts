@@ -11,15 +11,19 @@ export type FixCardGroup =
   | 'measure'
   | 'ignore'
   | 'render'
+  | 'upgrade'
+  | 'disable'
 
 export type FixCardIcon =
   | 'align-left'
+  | 'arrow-up'
   | 'database'
   | 'history'
   | 'layout'
   | 'loading'
-  | 'pointer-click'
+  | 'minus'
   | 'minus-circle'
+  | 'pointer-click'
   | 'server-stack'
   | 'timer'
   | 'zap'
@@ -38,6 +42,8 @@ export const FIX_CARD_GROUPS: Record<
   measure: { label: 'Measure', color: 'gray', icon: 'timer' },
   ignore: { label: 'Ignore', color: 'red', icon: 'minus-circle' },
   render: { label: 'Render', color: 'gray', icon: 'layout' },
+  upgrade: { label: 'Upgrade', color: 'amber', icon: 'arrow-up' },
+  disable: { label: 'Disable', color: 'gray', icon: 'minus' },
 }
 
 export type FixCard = {
@@ -65,8 +71,6 @@ export type Snippet = {
   // tooling that reads the full line content.
   parts?: SnippetPart[]
 }
-
-// ── Blocking-route cards ──────────────────────────
 
 const runtimeCards: FixCard[] = [
   {
@@ -227,8 +231,6 @@ const dynamicCards: FixCard[] = [
   },
 ]
 
-// ── Unrendered-segment cards ──────────────────────
-
 const unrenderedSegmentCards: FixCard[] = [
   {
     id: 'render-the-dropped-segment',
@@ -270,7 +272,42 @@ const unrenderedSegmentCards: FixCard[] = [
   },
 ]
 
-// ── Metadata cards ────────────────────────────────
+const linkPrefetchPartialCards: FixCard[] = [
+  {
+    id: 'opt-into-partial-prefetching',
+    title: 'Opt into Partial Prefetching',
+    group: 'upgrade',
+    link: 'https://nextjs.org/docs/messages/instant-link-prefetch-partial#opt-into-partial-prefetching',
+    snippets: [
+      { text: '// page.tsx or layout.tsx' },
+      { text: "export const prefetch = 'partial'", highlight: true },
+    ],
+    copyable: true,
+  },
+  {
+    id: 'use-the-default-prefetch',
+    title: 'Use the default prefetch',
+    group: 'disable',
+    link: 'https://nextjs.org/docs/messages/instant-link-prefetch-partial#use-the-default-prefetch',
+    snippets: [
+      { text: '<Link href="/dashboard">', highlight: true },
+      { text: '  Dashboard' },
+      { text: '</Link>' },
+    ],
+    copyable: true,
+  },
+  {
+    id: 'disable-validation-on-this-route',
+    title: 'Disable validation on this route',
+    group: 'ignore',
+    link: 'https://nextjs.org/docs/messages/instant-link-prefetch-partial#disable-validation-on-this-route',
+    snippets: [
+      { text: '// page.tsx or layout.tsx' },
+      { text: 'export const instant = false', highlight: true },
+    ],
+    copyable: true,
+  },
+]
 
 const metadataRuntimeCards: FixCard[] = [
   {
@@ -324,8 +361,6 @@ const metadataDynamicCards: FixCard[] = [
   },
 ]
 
-// ── Viewport cards ────────────────────────────────
-
 const viewportRuntimeCards: FixCard[] = [
   {
     id: 'use-static-viewport',
@@ -377,8 +412,6 @@ const viewportDynamicCards: FixCard[] = [
     copyable: true,
   },
 ]
-
-// ── Sync IO cards (per API) ───────────────────────
 
 const syncMathCards: FixCard[] = [
   {
@@ -509,8 +542,6 @@ const syncCryptoCards: FixCard[] = [
   },
 ]
 
-// ── Client sync IO cards (no Suspense above) ──────
-
 const syncClientDateCards: FixCard[] = [
   {
     id: 'wrap-in-or-move-into-suspense',
@@ -604,8 +635,6 @@ const syncClientCryptoCards: FixCard[] = [
   },
 ]
 
-// ── Card lookup ───────────────────────────────────
-
 export type GuidanceKind =
   | 'blocking-route'
   | 'client-hook'
@@ -614,6 +643,7 @@ export type GuidanceKind =
   | 'sync-io'
   | 'sync-io-client'
   | 'unrendered-segment'
+  | 'link-prefetch-partial'
 
 export type GuidanceVariant = 'runtime' | 'dynamic'
 
@@ -629,6 +659,8 @@ export const DOCS_URLS: Record<GuidanceKind, string> = {
   'sync-io-client': '',
   'unrendered-segment':
     'https://nextjs.org/docs/messages/instant-unrendered-segment',
+  'link-prefetch-partial':
+    'https://nextjs.org/docs/messages/instant-link-prefetch-partial',
 }
 
 export const SYNC_IO_DOCS: Record<string, string> = {
@@ -701,6 +733,8 @@ export const EXPLANATIONS: Record<GuidanceKind, string> = {
     'This value would be evaluated during the prerender and fixed at build time, instead of recomputed on each visit.',
   'unrendered-segment':
     'This segment was dropped from rendering. Issues that would prevent instant navigation will go undetected.',
+  'link-prefetch-partial':
+    'This will lead to slower, more expensive prefetches.',
 }
 
 export const BLOCKING_ROUTE_NAVIGATION_EXPLANATION =
@@ -760,6 +794,8 @@ export function getCards(
       return (cause && syncClientCardsByCause[cause]) || []
     case 'unrendered-segment':
       return unrenderedSegmentCards
+    case 'link-prefetch-partial':
+      return linkPrefetchPartialCards
     default:
       return kind satisfies never
   }
