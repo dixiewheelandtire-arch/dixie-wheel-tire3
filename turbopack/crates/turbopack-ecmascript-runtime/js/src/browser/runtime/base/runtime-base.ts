@@ -64,6 +64,11 @@ interface RuntimeBackend {
     params?: RuntimeParams
   ) => void
   /**
+   * Registers an entry-only registration (inlined into the HTML): loads the params'
+   * other chunks and runs its runtime modules, with no self chunk identity.
+   */
+  registerEntry: (params: RuntimeParams) => void
+  /**
    * Returns the same Promise for the same chunk URL.
    */
   loadChunkCached: (sourceType: SourceType, chunkUrl: ChunkUrl) => Promise<void>
@@ -90,7 +95,12 @@ function loadChunk(
 }
 browserContextPrototype.l = loadChunk
 
-function loadInitialChunk(chunkPath: ChunkPath, chunkData: ChunkData) {
+// `chunkPath` is the source chunk; it is `undefined` for entry-only registrations,
+// which have no self chunk (`SourceData` already allows this).
+function loadInitialChunk(
+  chunkPath: ChunkPath | undefined,
+  chunkData: ChunkData
+) {
   return loadChunkInternal(SourceType.Runtime, chunkPath, chunkData)
 }
 

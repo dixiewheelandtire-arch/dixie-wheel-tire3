@@ -839,6 +839,8 @@ function loadChunk(chunkData) {
     return loadChunkInternal(SourceType.Parent, this.m.id, chunkData);
 }
 browserContextPrototype.l = loadChunk;
+// `chunkPath` is the source chunk; it is `undefined` for entry-only registrations,
+// which have no self chunk (`SourceData` already allows this).
 function loadInitialChunk(chunkPath, chunkData) {
     return loadChunkInternal(SourceType.Runtime, chunkPath, chunkData);
 }
@@ -1468,6 +1470,70 @@ var BACKEND;
                 });
             })();
         },
+        registerEntry: // Handles an inlined entry-only registration. Load the entry's other chunks and run its
+        // runtime modules with no source chunk (`undefined`).
+        function registerEntry(params) {
+            return _async_to_generator(function() {
+                var _iteratorNormalCompletion, _didIteratorError, _iteratorError, _iterator, _step, otherChunkData, otherChunkUrl, _iteratorNormalCompletion1, _didIteratorError1, _iteratorError1, _iterator1, _step1, moduleId;
+                return _ts_generator(this, function(_state) {
+                    switch(_state.label){
+                        case 0:
+                            _iteratorNormalCompletion = true, _didIteratorError = false, _iteratorError = undefined;
+                            try {
+                                for(_iterator = params.otherChunks[Symbol.iterator](); !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true){
+                                    otherChunkData = _step.value;
+                                    otherChunkUrl = getChunkRelativeUrl(getChunkPath(otherChunkData));
+                                    getOrCreateResolver(otherChunkUrl);
+                                }
+                            } catch (err) {
+                                _didIteratorError = true;
+                                _iteratorError = err;
+                            } finally{
+                                try {
+                                    if (!_iteratorNormalCompletion && _iterator.return != null) {
+                                        _iterator.return();
+                                    }
+                                } finally{
+                                    if (_didIteratorError) {
+                                        throw _iteratorError;
+                                    }
+                                }
+                            }
+                            return [
+                                4,
+                                Promise.all(params.otherChunks.map(function(otherChunkData) {
+                                    return loadInitialChunk(undefined, otherChunkData);
+                                }))
+                            ];
+                        case 1:
+                            _state.sent();
+                            _iteratorNormalCompletion1 = true, _didIteratorError1 = false, _iteratorError1 = undefined;
+                            try {
+                                for(_iterator1 = params.runtimeModuleIds[Symbol.iterator](); !(_iteratorNormalCompletion1 = (_step1 = _iterator1.next()).done); _iteratorNormalCompletion1 = true){
+                                    moduleId = _step1.value;
+                                    getOrInstantiateRuntimeModule(undefined, moduleId);
+                                }
+                            } catch (err) {
+                                _didIteratorError1 = true;
+                                _iteratorError1 = err;
+                            } finally{
+                                try {
+                                    if (!_iteratorNormalCompletion1 && _iterator1.return != null) {
+                                        _iterator1.return();
+                                    }
+                                } finally{
+                                    if (_didIteratorError1) {
+                                        throw _iteratorError1;
+                                    }
+                                }
+                            }
+                            return [
+                                2
+                            ];
+                    }
+                });
+            })();
+        },
         /**
      * Loads the given chunk, and returns a promise that resolves once the chunk
      * has been loaded.
@@ -1603,9 +1669,16 @@ var BACKEND;
         return resolver.promise;
     }
 })();
+function registerChunkOrEntry(registration) {
+    if (Array.isArray(registration)) {
+        registerChunk(registration);
+    } else {
+        BACKEND.registerEntry(registration);
+    }
+}
 var chunksToRegister = globalThis["TURBOPACK"];
-globalThis["TURBOPACK"] = { push: registerChunk };
-chunksToRegister.forEach(registerChunk);
+globalThis["TURBOPACK"] = { push: registerChunkOrEntry };
+chunksToRegister.forEach(registerChunkOrEntry);
 })();
 
 
