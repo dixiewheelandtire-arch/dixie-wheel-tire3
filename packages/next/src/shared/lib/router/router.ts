@@ -2359,6 +2359,7 @@ export default class Router implements BaseRouter {
   }
 
   urlIsNew(asPath: string): boolean {
+    if (this.onlyAHashChange(asPath)) return true
     return this.asPath !== asPath
   }
 
