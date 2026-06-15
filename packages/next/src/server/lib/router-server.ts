@@ -14,6 +14,7 @@ import { serveStatic } from '../serve-static'
 import setupDebug from 'next/dist/compiled/debug'
 import * as Log from '../../build/output/log'
 import { DecodeError } from '../../shared/lib/utils'
+import { deobfuscateText } from '../../shared/lib/magic-identifier'
 import { findPagesDir } from '../../lib/find-pages-dir'
 import { setupFsCheck } from './router-utils/filesystem'
 import { proxyRequest } from './router-utils/proxy-request'
@@ -64,6 +65,42 @@ import { getNextConfigRuntime, type NextConfigComplete } from '../config-shared'
 const debug = setupDebug('next:router-server:main')
 const isNextFont = (pathname: string | null) =>
   pathname && /\/media\/[^/]+\.(woff|woff2|eot|ttf|otf)$/.test(pathname)
+
+// ModuleBuildError can cross compiled module boundaries, so constructor
+// identity is not reliable. Check its stable fields and string prefix instead.
+function isModuleBuildError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const maybeError = error as {
+    code?: unknown
+    constructor?: { name?: unknown }
+    name?: unknown
+  }
+  const errorString = String(error)
+
+  return (
+    maybeError.name === 'ModuleBuildError' ||
+    maybeError.code === 'ModuleBuildError' ||
+    maybeError.constructor?.name === 'ModuleBuildError' ||
+    errorString.startsWith('ModuleBuildError:') ||
+    errorString.startsWith('Error [ModuleBuildError]:')
+  )
+}
+
+function getErrorMessage(error: unknown): string {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return deobfuscateText(error.message)
+  }
+
+  return deobfuscateText(String(error))
+}
 
 export type RenderServer = Pick<
   typeof import('./render-server'),
@@ -615,12 +652,38 @@ export async function initialize(opts: {
       if (matchedOutput) {
         invokedOutputs.add(matchedOutput.itemPath)
 
+        // fsChecker preserves compilation errors from its dev ensure step so
+        // the route remains matched. Log the compiler diagnostic, then render
+        // the matched route as a 500 instead of falling through to a 404.
+        if (matchedOutput.error && development) {
+          development.bundler.logErrorWithOriginalStack(
+            matchedOutput.error,
+            matchedOutput.type === 'appFile' ? 'app-dir' : undefined
+          )
+        }
+
         return await invokeRender(
           parsedUrl,
           parsedUrl.pathname || '/',
           handleIndex,
           {
             invokeOutput: matchedOutput.itemPath,
+            ...(matchedOutput.error
+              ? {
+                  invokeStatus: 500,
+                  invokeError: matchedOutput.error,
+                }
+              : undefined),
+            // fsChecker owns the route match for filesystem requests. Forward
+            // it so BaseServer does not need the removed matcher manager.
+            ...(matchedOutput.route
+              ? {
+                  match: {
+                    definition: matchedOutput.route,
+                    params: matchedOutput.params,
+                  },
+                }
+              : undefined),
           }
         )
       }
@@ -706,6 +769,10 @@ export async function initialize(opts: {
         if (err instanceof DecodeError) {
           invokePath = '/400'
           invokeStatus = '400'
+        } else if (isModuleBuildError(err)) {
+          // Webpack compilation failures may bubble out of invokeRender. Log
+          // the readable diagnostic without printing the wrapper stack again.
+          Log.error(getErrorMessage(err))
         } else {
           console.error(err)
         }
