@@ -1623,7 +1623,10 @@ export default async function build(
 
       // #region Compile
 
-      Log.info('Creating an optimized production build ...')
+      const totalPageCount = pageKeys.pages.length + (pageKeys.app?.length ?? 0)
+      Log.info(
+        `Creating an optimized production build (${totalPageCount} page template${totalPageCount === 1 ? '' : 's'}) ...`
+      )
       traceMemoryUsage('Starting build', nextBuildSpan)
 
       await updateBuildDiagnostics({
@@ -2000,7 +2003,6 @@ export default async function build(
       // #endregion
       // #region Collect data
 
-      const totalPageCount = pageKeys.pages.length + (pageKeys.app?.length || 0)
       const numberOfWorkers = getNumberOfWorkers(config, totalPageCount)
       const collectingPageDataStart = process.hrtime()
       const postCompileSpinner = createSpinner(
