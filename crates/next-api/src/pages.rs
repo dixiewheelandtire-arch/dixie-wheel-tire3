@@ -1235,6 +1235,9 @@ impl PageEndpoint {
     async fn build_manifest(
         &self,
         client_chunks: ResolvedVc<OutputAssets>,
+        // The inline chunk group bootstrap params for this page, when the client chunking
+        // context inlines the bootstrap instead of emitting a per-route chunk.
+        chunk_group_bootstrap_params: Option<RcStr>,
     ) -> Result<Vc<Box<dyn OutputAsset>>> {
         let node_root = self.pages_project.project().node_root().owned().await?;
         let client_relative_path = self
@@ -1246,11 +1249,27 @@ impl PageEndpoint {
 
         // Check if we should include pages in the manifest
         let pages_structure = self.pages_structure.await?;
-        let pages = if pages_structure.should_create_pages_entries {
-            fxindexmap!(self.pathname.clone() => client_chunks)
-        } else {
-            fxindexmap![] // Empty pages when no user pages should be created
-        };
+        let (pages, pages_chunk_group_bootstrap_params) =
+            if pages_structure.should_create_pages_entries {
+                (
+                    fxindexmap!(self.pathname.clone() => client_chunks),
+                    chunk_group_bootstrap_params
+                        .map(|params| fxindexmap!(self.pathname.clone() => params))
+                        .unwrap_or_default(),
+                )
+            } else {
+                // Empty when no user pages should be created
+                (fxindexmap![], fxindexmap![])
+            };
+
+        let chunk_loading_global = (*self
+            .pages_project
+            .project()
+            .next_config()
+            .turbopack_chunk_loading_global()
+            .await?)
+            .clone()
+            .unwrap_or_else(|| rcstr!("TURBOPACK"));
 
         let manifest_path_prefix = get_asset_prefix_from_pathname(&self.pathname);
         let build_manifest = BuildManifest {
@@ -1262,6 +1281,8 @@ impl PageEndpoint {
             polyfill_files: Default::default(),
             root_main_files: Default::default(),
             root_main_files_per_page: Default::default(),
+            pages_chunk_group_bootstrap_params,
+            chunk_loading_global,
         };
         Ok(Vc::upcast(build_manifest.cell()))
     }
@@ -1316,9 +1337,15 @@ impl PageEndpoint {
             PageEndpointType::Html => {
                 let client_chunk_group = self.client_chunk_group();
                 client_assets.extend(client_chunk_group.all_assets().await?.iter().copied());
-                let client_chunks = *client_chunk_group.await?.assets;
+                let client_chunk_group_ref = client_chunk_group.await?;
+                let client_chunks = *client_chunk_group_ref.assets;
+                let chunk_group_bootstrap_params =
+                    client_chunk_group_ref.chunk_group_bootstrap_params.clone();
 
-                let build_manifest = self.build_manifest(client_chunks).to_resolved().await?;
+                let build_manifest = self
+                    .build_manifest(client_chunks, chunk_group_bootstrap_params)
+                    .to_resolved()
+                    .await?;
                 let page_loader = self.page_loader(client_chunks).to_resolved().await?;
                 let client_build_manifest = self
                     .client_build_manifest(*page_loader)

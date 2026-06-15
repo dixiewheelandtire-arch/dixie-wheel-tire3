@@ -40,6 +40,16 @@ pub struct BuildManifest {
     /// page-specific scripts without polluting the shared `rootMainFiles`.
     #[bincode(with = "turbo_bincode::indexmap")]
     pub root_main_files_per_page: FxIndexMap<RcStr, Vec<ResolvedVc<Box<dyn OutputAsset>>>>,
+    /// Per-page inline chunk group bootstrap params — the `{ otherChunks,
+    /// runtimeModuleIds }` registration object (as JSON). Next wraps it in
+    /// `globalThis[chunkLoadingGlobal].push(...)` itself (inline in the document for the
+    /// initial page; in `route-loader` for client navigations). Empty when the per-route
+    /// bootstrap is emitted as a chunk (eg. in dev).
+    #[bincode(with = "turbo_bincode::indexmap")]
+    pub pages_chunk_group_bootstrap_params: FxIndexMap<RcStr, RcStr>,
+    /// The `globalThis[...]` chunk-loading global the runtime drains (default
+    /// `"TURBOPACK"`). Needed to wrap `pages_chunk_group_bootstrap_params` client-side.
+    pub chunk_loading_global: RcStr,
 }
 
 #[turbo_tasks::value_impl]
@@ -101,6 +111,8 @@ impl Asset for BuildManifest {
             pub pages: FxIndexMap<RcStr, Vec<RcStr>>,
             pub amp_first_pages: Vec<RcStr>,
             pub root_main_files_tree: FxIndexMap<RcStr, Vec<RcStr>>,
+            pub pages_chunk_group_bootstrap_params: FxIndexMap<RcStr, RcStr>,
+            pub chunk_loading_global: RcStr,
         }
 
         let pages: Vec<(RcStr, Vec<RcStr>)> = self
@@ -195,6 +207,8 @@ impl Asset for BuildManifest {
             polyfill_files,
             root_main_files,
             root_main_files_tree: FxIndexMap::from_iter(root_main_files_tree),
+            pages_chunk_group_bootstrap_params: self.pages_chunk_group_bootstrap_params.clone(),
+            chunk_loading_global: self.chunk_loading_global.clone(),
             ..Default::default()
         };
 

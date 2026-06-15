@@ -14,6 +14,12 @@ export type BuildManifest = {
     '/_app': readonly string[]
     [page: string]: readonly string[]
   }
+  // Per-page Turbopack chunk-group bootstrap params — the `{ otherChunks,
+  // runtimeModuleIds }` object as a JSON string.
+  pagesChunkGroupBootstrapParams?: { [page: string]: string }
+  // The `globalThis[...]` chunk-loading global the runtime drains (default
+  // "TURBOPACK"); used to wrap `pagesChunkGroupBootstrapParams`.
+  chunkLoadingGlobal?: string
 }
 
 export function getPageFiles(
