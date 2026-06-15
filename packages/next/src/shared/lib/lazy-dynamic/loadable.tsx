@@ -49,7 +49,8 @@ function Loadable(options: LoadableOptions) {
     ) : null
 
     // If it's non-SSR or provided a loading component, wrap it in a suspense boundary
-    const hasSuspenseBoundary = !opts.ssr || !!opts.loading
+    const hasSuspenseBoundary =
+      'loading' in options ? !!opts.loading : !opts.ssr
     const Wrap = hasSuspenseBoundary ? Suspense : Fragment
     const wrapProps = hasSuspenseBoundary ? { fallback: fallbackElement } : {}
     const children = opts.ssr ? (

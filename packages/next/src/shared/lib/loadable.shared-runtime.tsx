@@ -138,7 +138,7 @@ function createLoadableComponent(loadFn: any, options: any) {
 
     return React.useMemo(() => {
       if (state.loading || state.error) {
-        return React.createElement(opts.loading, {
+        return React.createElement(opts.loading || (() => null), {
           isLoading: state.loading,
           pastDelay: state.pastDelay,
           timedOut: state.timedOut,
