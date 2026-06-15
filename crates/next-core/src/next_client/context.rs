@@ -576,7 +576,11 @@ pub async fn get_client_chunking_context(
                 },
             )
             .chunk_content_hashing(ContentHashing::Direct { length: 13 })
-            .module_merging(*scope_hoisting.await?);
+            .module_merging(*scope_hoisting.await?)
+            // Inline each entrypoint's chunk group bootstrap into the HTML instead of
+            // shipping a per-route evaluate chunk. The shared runtime chunk is still
+            // emitted. Production only — dev keeps the file-based path for HMR.
+            .inline_chunk_group_bootstrap(true);
     }
 
     Ok(Vc::upcast(builder.build()))

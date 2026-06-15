@@ -22,6 +22,35 @@ export type BuildManifest = {
   chunkLoadingGlobal?: string
 }
 
+/**
+ * Builds the inline Turbopack chunk-group bootstrap script content for the given pages:
+ * one `globalThis[<global>].push(<params>)` statement per page. This seeds the runtime's
+ * chunk-loading queue before the shared runtime chunk drains it, so each page's entry
+ * module is instantiated (and, for pages router, registers via `__NEXT_P`).
+ *
+ * Returns undefined when there's nothing to inline — webpack builds, or dev where the
+ * per-route evaluate chunk is emitted instead of inlining.
+ */
+export function getTurbopackChunkGroupBootstrap(
+  buildManifest: BuildManifest,
+  pages: readonly string[]
+): string | undefined {
+  const paramsByPage = buildManifest.pagesChunkGroupBootstrapParams
+  const chunkLoadingGlobal = buildManifest.chunkLoadingGlobal
+  if (!paramsByPage || !chunkLoadingGlobal) return undefined
+
+  const g = JSON.stringify(chunkLoadingGlobal)
+  const statements = pages
+    .map((page) => paramsByPage[page])
+    .filter(Boolean)
+    .map(
+      (params) =>
+        `(globalThis[${g}] || (globalThis[${g}] = [])).push(${params});`
+    )
+
+  return statements.length > 0 ? statements.join('\n') : undefined
+}
+
 export function getPageFiles(
   buildManifest: BuildManifest,
   page: string

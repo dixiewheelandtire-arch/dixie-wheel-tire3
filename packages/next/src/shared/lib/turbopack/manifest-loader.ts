@@ -585,11 +585,38 @@ export class TurbopackManifestLoader {
       sortedPageKeys
     )
 
-    const clientBuildManifestJs = `self.__BUILD_MANIFEST = ${JSON.stringify(
-      clientBuildManifest,
-      null,
-      2
-    )};self.__BUILD_MANIFEST_CB && self.__BUILD_MANIFEST_CB()`
+    // Expose each route's chunk-group bootstrap params (and the chunk-loading
+    // global) to the client so `route-loader` can instantiate a navigated page's
+    // entry module on demand. The per-route evaluate chunk is dropped and the
+    // document's inline bootstrap only covers the initial page; navigated pages
+    // push their registration object onto the runtime queue (no eval).
+    //
+    // The server build manifest stores the params as a JSON object string per route
+    // (plus the global the runtime drains); deserialize them into the client manifest.
+    const pageBootstrapParams: Record<string, unknown> = {}
+    let chunkLoadingGlobal: string | undefined
+    for (const m of this.buildManifests.values()) {
+      if (m.chunkLoadingGlobal) chunkLoadingGlobal = m.chunkLoadingGlobal
+      const paramsByRoute = m.pagesChunkGroupBootstrapParams
+      if (!paramsByRoute) continue
+      for (const [route, params] of Object.entries(paramsByRoute)) {
+        try {
+          pageBootstrapParams[route] = JSON.parse(params)
+        } catch {
+          // skip malformed entries rather than break the whole manifest
+        }
+      }
+    }
+
+    const clientBuildManifestJs =
+      `self.__BUILD_MANIFEST = ${JSON.stringify(clientBuildManifest, null, 2)};` +
+      `self.__TURBOPACK_PAGE_BOOTSTRAP = ${JSON.stringify(pageBootstrapParams)};` +
+      (chunkLoadingGlobal
+        ? `self.__TURBOPACK_CHUNK_LOADING_GLOBAL = ${JSON.stringify(
+            chunkLoadingGlobal
+          )};`
+        : '') +
+      `self.__BUILD_MANIFEST_CB && self.__BUILD_MANIFEST_CB()`
 
     writeFileAtomic(
       join(this.distDir, buildManifestPath),

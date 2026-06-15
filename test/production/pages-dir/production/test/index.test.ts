@@ -1197,6 +1197,9 @@ describe('Production Usage', () => {
     for (const script of $('script').toArray()) {
       // application/json doesn't need async
       if (
+        // Inline scripts (no `src`) can't be deferred — e.g. the Turbopack chunk-group
+        // bootstrap is emitted inline and runs during parse.
+        !script.attribs.src ||
         script.attribs.type === 'application/json' ||
         script.attribs.src.includes('polyfills')
       ) {

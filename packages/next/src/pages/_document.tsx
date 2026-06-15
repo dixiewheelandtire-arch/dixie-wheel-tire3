@@ -12,7 +12,10 @@ import type {
 import type { ScriptProps } from '../client/script'
 import type { NextFontManifest } from '../build/webpack/plugins/next-font-manifest-plugin'
 
-import { getPageFiles } from '../server/get-page-files'
+import {
+  getPageFiles,
+  getTurbopackChunkGroupBootstrap,
+} from '../server/get-page-files'
 import type { BuildManifest } from '../server/get-page-files'
 import { htmlEscapeJsonString } from '../shared/lib/htmlescape'
 import isError from '../lib/is-error'
@@ -128,6 +131,29 @@ function getDynamicChunks(
   })
 }
 
+// When Turbopack inlines the per-route chunk group bootstrap, the build manifest holds
+// each route's registration params. This unions the shared (`/_app`) and the current
+// route's bootstrap into one inline <script> that seeds the runtime queue before the
+// shared runtime chunk drains it.
+function getInlineBootstrapScript(context: HtmlProps, props: OriginProps) {
+  const { buildManifest, __NEXT_DATA__, crossOrigin } = context
+  const bootstrap = getTurbopackChunkGroupBootstrap(buildManifest, [
+    '/_app',
+    __NEXT_DATA__.page,
+  ])
+  if (!bootstrap) return null
+
+  const html = htmlEscapeJsonString(bootstrap)
+  return (
+    <script
+      key="turbopack-bootstrap"
+      nonce={props.nonce}
+      crossOrigin={props.crossOrigin || crossOrigin}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  )
+}
+
 function getScripts(
   context: HtmlProps,
   props: OriginProps,
@@ -148,7 +174,7 @@ function getScripts(
     file.endsWith('.js')
   )
 
-  return [...normalScripts, ...lowPriorityScripts].map((file) => {
+  const scripts = [...normalScripts, ...lowPriorityScripts].map((file) => {
     // static/immutable/chunks/51e975e7b637a580.js should use the immutable id, while
     // static/Yj152X97rfGgF7NPcJEZs/_ssgManifest.js should use the deployment id
     const query = file.startsWith('static/immutable/chunks')
@@ -165,6 +191,11 @@ function getScripts(
       />
     )
   })
+
+  // Emit the bootstrap before the chunk <script>s so the `globalThis.TURBOPACK` queue
+  // exists before an async runtime chunk could run (and hit its `!Array.isArray` guard).
+  const bootstrapScript = getInlineBootstrapScript(context, props)
+  return bootstrapScript ? [bootstrapScript, ...scripts] : scripts
 }
 
 function getPreNextWorkerScripts(context: HtmlProps, props: OriginProps) {

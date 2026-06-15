@@ -12,6 +12,14 @@ declare global {
   interface Window {
     __BUILD_MANIFEST?: Record<string, string[]>
     __BUILD_MANIFEST_CB?: Function
+    // Per-route Turbopack chunk-group bootstrap params (prod). Lets client
+    // navigation execute a navigated page's entry module on demand, now that the
+    // per-route evaluate chunk is dropped (its initial bootstrap is inlined in
+    // the document). Each value is the `{ otherChunks, runtimeModuleIds }`
+    // registration object; `__TURBOPACK_CHUNK_LOADING_GLOBAL` is the global the
+    // runtime drains.
+    __TURBOPACK_PAGE_BOOTSTRAP?: Record<string, unknown>
+    __TURBOPACK_CHUNK_LOADING_GLOBAL?: string
     __SERVER_FILES_MANIFEST?: RequiredServerFilesManifest
     __MIDDLEWARE_MATCHERS?: ProxyMatcher[]
     __MIDDLEWARE_MATCHERS_CB?: Function
@@ -246,6 +254,25 @@ export function createRouteLoader(assetPrefix: string): RouteLoader {
   const styleSheets: Map<string, Promise<RouteStyleSheet>> = new Map()
   const routes: Map<string, Future<RouteLoaderEntry> | RouteLoaderEntry> =
     new Map()
+  const bootstrappedRoutes: Set<string> = new Set()
+
+  // After a navigated route's chunks are appended, run its inlined bootstrap so the
+  // page's entry module executes and registers via `window.__NEXT_P` (which
+  // `whenEntrypoint` awaits). The initial page is bootstrapped inline in the document;
+  // navigated pages have no evaluate chunk.
+  function bootstrapRoute(route: string): void {
+    if (process.env.NODE_ENV === 'development') return
+    if (bootstrappedRoutes.has(route)) return
+    const params = self.__TURBOPACK_PAGE_BOOTSTRAP?.[route]
+    const global = self.__TURBOPACK_CHUNK_LOADING_GLOBAL
+    if (params == null || !global) return
+    bootstrappedRoutes.add(route)
+    // Push the entry registration onto the runtime's chunk-loading queue. After
+    // the initial load that global is the live `{ push }` whose `push`
+    // discriminates entry-objects (non-arrays) to `BACKEND.registerEntry`, which
+    // instantiates the page's module so it registers via `__NEXT_P`. No eval.
+    ;(self as any)[global].push(params)
+  }
 
   function maybeExecuteScript(
     src: TrustedScriptURL | string
@@ -345,7 +372,12 @@ export function createRouteLoader(assetPrefix: string): RouteLoader {
               return Promise.all([
                 entrypoints.has(route)
                   ? []
-                  : Promise.all(scripts.map(maybeExecuteScript)),
+                  : Promise.all(scripts.map(maybeExecuteScript)).then((r) => {
+                      // bootstrap the navigated route once its chunks are appended so
+                      // its entry module executes.
+                      bootstrapRoute(route)
+                      return r
+                    }),
                 Promise.all(css.map(fetchStyleSheet)),
               ] as const)
             })
