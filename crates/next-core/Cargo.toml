@@ -88,7 +88,8 @@ turbopack-static = { workspace = true }
 turbopack-trace-utils = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 turbo-tasks-backend = { workspace = true }
 
 [features]

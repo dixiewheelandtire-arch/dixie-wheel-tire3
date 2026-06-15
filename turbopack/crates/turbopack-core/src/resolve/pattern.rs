@@ -14,7 +14,8 @@ use turbo_tasks::{
     NonLocalValue, TaskInput, ValueToString, Vc, debug::ValueDebugFormat, trace::TraceRawVcs,
 };
 use turbo_tasks_fs::{
-    FileSystemPath, LinkContent, LinkType, RawDirectoryContent, RawDirectoryEntry,
+    FileSystemEntryType, FileSystemPath, LinkContent, LinkType, RawDirectoryContent,
+    RawDirectoryEntry, classify_cross_root_symlink,
 };
 use turbo_unix_path::normalize_path;
 
@@ -1606,15 +1607,42 @@ pub async fn read_matches(
                         )),
                         RawDirectoryEntry::Symlink => {
                             let fs_path = parent_fs_path.join(last_segment)?;
-                            let LinkContent::Link { link_type, .. } = &*fs_path.read_link().await?
-                            else {
-                                continue;
-                            };
+                            let link = fs_path.read_link().await?;
                             let path = concat(&prefix, str).into();
-                            if link_type.contains(LinkType::DIRECTORY) {
-                                results.push((index, PatternMatch::Directory(path, fs_path)));
-                            } else {
-                                results.push((index, PatternMatch::File(path, fs_path)))
+                            match &*link {
+                                LinkContent::Link { link_type, .. } => {
+                                    if link_type.contains(LinkType::DIRECTORY) {
+                                        results
+                                            .push((index, PatternMatch::Directory(path, fs_path)));
+                                    } else {
+                                        results.push((index, PatternMatch::File(path, fs_path)))
+                                    }
+                                }
+                                // Symlink target is outside the fs root (e.g.,
+                                // symlinks that point outside the filesystem root).
+                                // Fall back to OS-level metadata.
+                                LinkContent::Invalid => {
+                                    if let Some(ty) =
+                                        classify_cross_root_symlink(fs_path.clone()).await?
+                                    {
+                                        match ty {
+                                            FileSystemEntryType::Directory => {
+                                                results.push((
+                                                    index,
+                                                    PatternMatch::Directory(path, fs_path),
+                                                ));
+                                            }
+                                            FileSystemEntryType::File => {
+                                                results.push((
+                                                    index,
+                                                    PatternMatch::File(path, fs_path),
+                                                ));
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                                LinkContent::NotFound => {}
                             }
                         }
                         _ => {}
@@ -1795,32 +1823,70 @@ pub async fn read_matches(
                                 }
                                 if let Some(pos) = pat.match_position(&prefix) {
                                     let fs_path = lookup_dir.join(key)?;
-                                    if let LinkContent::Link { link_type, .. } =
-                                        &*fs_path.read_link().await?
-                                    {
-                                        if link_type.contains(LinkType::DIRECTORY) {
-                                            results.push((
-                                                pos,
-                                                PatternMatch::Directory(
-                                                    prefix.clone().into(),
-                                                    fs_path,
-                                                ),
-                                            ));
-                                        } else {
-                                            results.push((
-                                                pos,
-                                                PatternMatch::File(prefix.clone().into(), fs_path),
-                                            ));
+                                    match &*fs_path.read_link().await? {
+                                        LinkContent::Link { link_type, .. } => {
+                                            if link_type.contains(LinkType::DIRECTORY) {
+                                                results.push((
+                                                    pos,
+                                                    PatternMatch::Directory(
+                                                        prefix.clone().into(),
+                                                        fs_path,
+                                                    ),
+                                                ));
+                                            } else {
+                                                results.push((
+                                                    pos,
+                                                    PatternMatch::File(
+                                                        prefix.clone().into(),
+                                                        fs_path,
+                                                    ),
+                                                ));
+                                            }
                                         }
+                                        LinkContent::Invalid => {
+                                            if let Some(ty) =
+                                                classify_cross_root_symlink(fs_path.clone()).await?
+                                            {
+                                                match ty {
+                                                    FileSystemEntryType::Directory => {
+                                                        results.push((
+                                                            pos,
+                                                            PatternMatch::Directory(
+                                                                prefix.clone().into(),
+                                                                fs_path,
+                                                            ),
+                                                        ));
+                                                    }
+                                                    FileSystemEntryType::File => {
+                                                        results.push((
+                                                            pos,
+                                                            PatternMatch::File(
+                                                                prefix.clone().into(),
+                                                                fs_path,
+                                                            ),
+                                                        ));
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                        LinkContent::NotFound => {}
                                     }
                                 }
                                 prefix.push('/');
                                 if let Some(pos) = pat.match_position(&prefix) {
                                     let fs_path = lookup_dir.join(key)?;
-                                    if let LinkContent::Link { link_type, .. } =
-                                        &*fs_path.read_link().await?
-                                        && link_type.contains(LinkType::DIRECTORY)
-                                    {
+                                    let is_dir = match &*fs_path.read_link().await? {
+                                        LinkContent::Link { link_type, .. } => {
+                                            link_type.contains(LinkType::DIRECTORY)
+                                        }
+                                        LinkContent::Invalid => matches!(
+                                            classify_cross_root_symlink(fs_path.clone()).await?,
+                                            Some(FileSystemEntryType::Directory)
+                                        ),
+                                        _ => false,
+                                    };
+                                    if is_dir {
                                         results.push((
                                             pos,
                                             PatternMatch::Directory(prefix.clone().into(), fs_path),
@@ -1829,10 +1895,17 @@ pub async fn read_matches(
                                 }
                                 if let Some(pos) = pat.could_match_position(&prefix) {
                                     let fs_path = lookup_dir.join(key)?;
-                                    if let LinkContent::Link { link_type, .. } =
-                                        &*fs_path.read_link().await?
-                                        && link_type.contains(LinkType::DIRECTORY)
-                                    {
+                                    let is_dir = match &*fs_path.read_link().await? {
+                                        LinkContent::Link { link_type, .. } => {
+                                            link_type.contains(LinkType::DIRECTORY)
+                                        }
+                                        LinkContent::Invalid => matches!(
+                                            classify_cross_root_symlink(fs_path.clone()).await?,
+                                            Some(FileSystemEntryType::Directory)
+                                        ),
+                                        _ => false,
+                                    };
+                                    if is_dir {
                                         results.push((
                                             pos,
                                             PatternMatch::Directory(prefix.clone().into(), fs_path),
