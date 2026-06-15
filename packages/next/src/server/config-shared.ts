@@ -1353,6 +1353,14 @@ export type ExportPathMap = {
      * @internal
      */
     _runInstantValidation?: boolean
+
+    /**
+     * When true, this route can be an interception target and must be marked
+     * interceptable in its prerendered RSC payload.
+     *
+     * @internal
+     */
+    _couldBeIntercepted?: boolean
   }
 }
 
